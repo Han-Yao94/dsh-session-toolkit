@@ -1,0 +1,12 @@
+# 依赖
+node_modules/
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# 环境变量
+.env
+.env.*
