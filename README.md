@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Consolidated local plugin toolkit for the DeepSeek Harness web profile. Six previously separate local plugins — session identity, global prompt, session auto-resume, web restart service, Session-log button relocation, and peer-session messaging — merged into one package mounted through the profile's `cordis.patch.yml`.
+Consolidated plugin toolkit for the DeepSeek Harness. Six previously separate local plugins — session identity, global prompt, session auto-resume, web restart service, Session-log button relocation, and peer-session messaging — merged into one installable package (official bundle form, `dsh.bundle.patch`), installed with `dsh plugin add`.
 
 ## Features
 
@@ -43,7 +43,7 @@ Settings namespaces (schema-validated, `applies: live`, persisted in `settings.y
 
 ### Plugin Config (cordis)
 
-The plugin exposes a single `Config` (schemastery schema) with per-feature keys. Defaults equal current behavior; override via the plugin row's `config` in `cordis.yml` / `cordis.patch.yml` without touching code. The client half follows the same cordis mechanism (it exports `Config` and receives `config.client`); this package is the first local client consumer — if schemastery is unavailable in the client bundle, the client half degrades to defaults without exporting `Config`:
+The plugin exposes a single `Config` (schemastery schema) with per-feature keys. Defaults equal current behavior; override via the plugin row's `config` in `cordis.yml` / `cordis.patch.yml` without touching code. The client half follows the same cordis mechanism (it exports `Config` and receives `config.client`); if schemastery is unavailable in the client bundle, the client half degrades to defaults without exporting `Config`:
 
 ```yaml
 - id: session-toolkit
@@ -83,38 +83,36 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 
 ## Deployment
 
-Official bundle form (recommended):
-
-- Source root: `D:\dsh-session-toolkit`
-- Install into a profile (pnpm link; single source, no copies):
-
-  ```powershell
-  dsh plugin --profile web add D:\dsh-session-toolkit
-  ```
-
-  This appends the package to the profile's `dsh.profile.bundles` and adds a `link:` dependency. The package's `dsh.bundle.patch` (`cordis.patch.yml`) registers the single entry (`id: session-toolkit`, `name: 'dsh-session-toolkit'`) as a **bundle layer** — applied after `dsh-base` / `dsh-web-app` and before the profile patch layer (layer order: bundles in sequence → profile patch → home patch → `--patch` overlay).
-
-- Uninstall: `dsh plugin --profile web remove dsh-session-toolkit`
-- From git/npm: pass the package reference instead of the local path (e.g. `dsh plugin --profile web add github:owner/dsh-session-toolkit`).
-
-Development alternative (non-official): manual junction instead of `dsh plugin add`:
+Install into any profile (bundle layer; single source, no copies):
 
 ```powershell
-cmd /c mklink /J "C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-toolkit" "D:\dsh-session-toolkit"
+# from npm
+dsh plugin --profile <name> add dsh-session-toolkit
+
+# from GitHub
+dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit
+
+# from a local checkout / tarball
+dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
 ```
 
-plus `D:\dsh-session-toolkit\node_modules` → `C:\Users\<user>\.dsh\profiles\node_modules` for dependency resolution, and an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer the official `dsh plugin add` flow.
+The package's `dsh.bundle.patch` (`cordis.patch.yml`) registers the single entry (`id: session-toolkit`, `name: 'dsh-session-toolkit'`) as a **bundle layer** — applied after `dsh-base` / `dsh-web-app` and before the profile patch layer (layer order: bundles in sequence → profile patch → home patch → `--patch` overlay).
 
+Uninstall: `dsh plugin --profile <name> remove dsh-session-toolkit`.
+
+### Local development
+
+For iterating on the source without publishing, install the checkout directly (`dsh plugin --profile <name> add <path-to-checkout>`, which uses a pnpm `link:` dependency), or use a manual junction into the profile's `node_modules` plus an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer `dsh plugin add`.
 
 ### Share & Install
 
-Pure-JS package — **no build step, no prepare script**. `files` already whitelists `lib/`, `client/`, `cordis.patch.yml` and READMEs.
+Published on **npm** as `dsh-session-toolkit` (v0.1.0, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and READMEs.
 
-- **npm publish**: `npm publish` (or `pnpm publish`) after checking the `files` list and license — add the `repository` field (real repo URL) to `package.json` before publishing; consumers install with `dsh plugin --profile <name> add dsh-session-toolkit`.
-- **GitHub**: `dsh plugin --profile <name> add github:<owner>/dsh-session-toolkit`.
+- **npm**: consumers run `dsh plugin --profile <name> add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
+- **GitHub**: `dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit`.
 - **Tarball**: `pnpm pack` → `dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz`.
 
-Runtime dependencies (`@deepseek-ai/schemastery`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-home-paths`) are declared in `dependencies` and install automatically; platform modules (`react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-*`) are `peerDependencies` provided by the DSH host. Verified: clean install of the packed tarball resolves all imports without the local junction.
+Runtime dependencies (`@deepseek-ai/schemastery`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-home-paths`) are declared in `dependencies` and install automatically; platform modules (`react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-*`) are `peerDependencies` provided by the DSH host. Verified: clean install of the packed tarball resolves all imports without any local junction.
 
 ## Model Experience
 
@@ -154,4 +152,4 @@ Each section's rendered text is a fixed part of the request prefix while its set
 
 ## Recovery
 
-Remove the `session-toolkit` entry from `cordis.patch.yml` (and re-enable the original plugins if their directories are still present), then restart the GUI to return to the pre-consolidation layout.
+Uninstall the bundle: `dsh plugin --profile <name> remove dsh-session-toolkit`, then restart the GUI. To roll back to the pre-consolidation layout, re-enable the original plugins instead of installing this package.

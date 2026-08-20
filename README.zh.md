@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-DeepSeek Harness web profile 的本地插件整合包。将六个此前相互独立的本地插件——会话身份、全局提示词、会话自动上线、Web 重启服务、Session log 按钮平移、会话间对等消息——合并为单一包，通过 profile 的 `cordis.patch.yml` 挂载。
+DeepSeek Harness 插件整合包。将六个此前相互独立的本地插件——会话身份、全局提示词、会话自动上线、Web 重启服务、Session log 按钮平移、会话间对等消息——合并为单一可安装包（官方组合包形态，`dsh.bundle.patch`），经 `dsh plugin add` 安装。
 
 ## 功能特性
 
@@ -43,7 +43,7 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
 
 ### 插件 Config（cordis）
 
-聚合包导出单一 `Config`（schemastery schema），按功能分键。默认值 = 现状；可在 `cordis.yml` / `cordis.patch.yml` 插件行的 `config` 字段覆盖，无需改代码。client 半遵循同一 cordis 机制（导出 `Config` 并接收 `config.client`），本包为首个本地 client 消费方——若 client bundle 无法解析 schemastery，client 半降级为默认值且不导出 `Config`（行为不变）：
+聚合包导出单一 `Config`（schemastery schema），按功能分键。默认值 = 现状；可在 `cordis.yml` / `cordis.patch.yml` 插件行的 `config` 字段覆盖，无需改代码。client 半遵循同一 cordis 机制（导出 `Config` 并接收 `config.client`）；若 client bundle 无法解析 schemastery，client 半降级为默认值且不导出 `Config`（行为不变）：
 
 ```yaml
 - id: session-toolkit
@@ -83,35 +83,33 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
 
 ## 部署
 
-官方组合包形态（推荐）：
-
-- 源码根目录：`D:\dsh-session-toolkit`
-- 安装进 profile（pnpm link；单一源码，无副本漂移）：
-
-  ```powershell
-  dsh plugin --profile web add D:\dsh-session-toolkit
-  ```
-
-  该命令把包追加到 profile 的 `dsh.profile.bundles` 并添加 `link:` 依赖。包内 `dsh.bundle.patch`（`cordis.patch.yml`）注册单一条目（`id: session-toolkit`，`name: 'dsh-session-toolkit'`）作为 **bundle 层**——在 `dsh-base` / `dsh-web-app` 之后、profile patch 层之前应用（层序：bundles 按序 → profile patch → home patch → `--patch` overlay）。
-
-- 卸载：`dsh plugin --profile web remove dsh-session-toolkit`
-- git/npm 安装：以包引用代替本地路径（如 `dsh plugin --profile web add github:owner/dsh-session-toolkit`）。
-
-开发期备选（非官方）：手工 junction 代替 `dsh plugin add`：
+安装进任意 profile（bundle 层；单一源码，无副本漂移）：
 
 ```powershell
-cmd /c mklink /J "C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-toolkit" "D:\dsh-session-toolkit"
+# npm 安装
+dsh plugin --profile <name> add dsh-session-toolkit
+
+# GitHub 安装
+dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit
+
+# 本地 checkout / tarball
+dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
 ```
 
-并配置 `D:\dsh-session-toolkit\node_modules` → `C:\Users\<user>\.dsh\profiles\node_modules` 供依赖解析，同时在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
+包内 `dsh.bundle.patch`（`cordis.patch.yml`）注册单一条目（`id: session-toolkit`，`name: 'dsh-session-toolkit'`）作为 **bundle 层**——在 `dsh-base` / `dsh-web-app` 之后、profile patch 层之前应用（层序：bundles 按序 → profile patch → home patch → `--patch` overlay）。
 
+卸载：`dsh plugin --profile <name> remove dsh-session-toolkit`。
+
+### 本地开发
+
+迭代源码时可直接安装 checkout（`dsh plugin --profile <name> add <源码路径>`，使用 pnpm `link:` 依赖），或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
 
 ### 分享与安装
 
-纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+已发布至 **npm**（`dsh-session-toolkit`，v0.1.0，MIT）并同步至 **GitHub**（`github.com/Han-Yao94/dsh-session-toolkit`）。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
 
-- **npm 发布**：`npm publish`（或 `pnpm publish`），发布前检查 `files` 列表与许可证，并在 `package.json` 补充 `repository` 字段（真实仓库 URL）；消费者 `dsh plugin --profile <name> add dsh-session-toolkit` 安装。
-- **GitHub 引用**：`dsh plugin --profile <name> add github:<owner>/dsh-session-toolkit`。
+- **npm**：消费者 `dsh plugin --profile <name> add dsh-session-toolkit` 安装；新版本通过 `npm publish`（或 `pnpm publish`）发布。
+- **GitHub**：`dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit`。
 - **tarball**：`pnpm pack` → `dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz`。
 
 运行时依赖（`@deepseek-ai/schemastery`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`）声明在 `dependencies`，随安装自动拉取；平台模块（`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-*`）为 `peerDependencies`，由 DSH 宿主提供。已验证：打包 tgz 的干净安装可完整解析所有 import（不依赖本地 junction）。
@@ -154,4 +152,4 @@ cmd /c mklink /J "C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-too
 
 ## 恢复方法
 
-从 `cordis.patch.yml` 移除 `session-toolkit` 条目（若原插件目录仍在，可恢复其注册条目），重启 GUI 即回到整合前布局。
+卸载组合包：`dsh plugin --profile <name> remove dsh-session-toolkit`，重启 GUI。若要回退到整合前布局，重新启用原插件而非安装本包。
