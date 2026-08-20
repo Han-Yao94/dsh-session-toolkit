@@ -105,6 +105,17 @@ cmd /c mklink /J "C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-too
 
 plus `D:\dsh-session-toolkit\node_modules` → `C:\Users\<user>\.dsh\profiles\node_modules` for dependency resolution, and an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer the official `dsh plugin add` flow.
 
+
+### Share & Install
+
+Pure-JS package — **no build step, no prepare script**. `files` already whitelists `lib/`, `client/`, `cordis.patch.yml` and READMEs.
+
+- **npm publish**: `npm publish` (or `pnpm publish`) after checking the `files` list and license — add the `repository` field (real repo URL) to `package.json` before publishing; consumers install with `dsh plugin --profile <name> add dsh-session-toolkit`.
+- **GitHub**: `dsh plugin --profile <name> add github:<owner>/dsh-session-toolkit`.
+- **Tarball**: `pnpm pack` → `dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz`.
+
+Runtime dependencies (`@deepseek-ai/schemastery`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-home-paths`) are declared in `dependencies` and install automatically; platform modules (`react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-*`) are `peerDependencies` provided by the DSH host. Verified: clean install of the packed tarball resolves all imports without the local junction.
+
 ## Model Experience
 
 ### System prompt contributions

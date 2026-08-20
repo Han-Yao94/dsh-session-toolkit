@@ -105,6 +105,17 @@ cmd /c mklink /J "C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-too
 
 并配置 `D:\dsh-session-toolkit\node_modules` → `C:\Users\<user>\.dsh\profiles\node_modules` 供依赖解析，同时在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
 
+
+### 分享与安装
+
+纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+
+- **npm 发布**：`npm publish`（或 `pnpm publish`），发布前检查 `files` 列表与许可证，并在 `package.json` 补充 `repository` 字段（真实仓库 URL）；消费者 `dsh plugin --profile <name> add dsh-session-toolkit` 安装。
+- **GitHub 引用**：`dsh plugin --profile <name> add github:<owner>/dsh-session-toolkit`。
+- **tarball**：`pnpm pack` → `dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz`。
+
+运行时依赖（`@deepseek-ai/schemastery`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`）声明在 `dependencies`，随安装自动拉取；平台模块（`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-*`）为 `peerDependencies`，由 DSH 宿主提供。已验证：打包 tgz 的干净安装可完整解析所有 import（不依赖本地 junction）。
+
 ## 模型体验
 
 ### 系统提示词贡献

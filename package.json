@@ -3,13 +3,30 @@
   "version": "0.1.0",
   "description": "Unified local plugin: session identity, global prompt, auto-resume, web restart, session log reposition, peer message (6 plugins consolidated).",
   "license": "MIT",
+  "author": "dsh-session-toolkit maintainers",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Han-Yao94/dsh-session-toolkit.git"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.7",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.7",
+    "react": "^18.2.0"
+  },
   "files": [
     "lib",
     "client",
     "cordis.patch.yml",
     "README.md",
-    "README.zh.md",
-    "README.en.md"
+    "README.zh.md"
   ],
   "type": "module",
   "main": "lib/index.js",
