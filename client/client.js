@@ -6,6 +6,16 @@ window.__ModuleLoader__.load({
     // dsh-dev 整合包 client 半：5 个功能模块内联（IIFE 隔离变量），统一 apply 顺序注册
     var registered = {};
     function collect(tag, applyFn) { registered[tag] = applyFn; }
+    // client Config：cordis 注入（默认值=现状）；schemastery 在 client bundle 不可用时降级（不导出 Config、默认值兜底）
+    var z = null;
+    try { z = require('@deepseek-ai/schemastery'); } catch (e) { z = null; }
+    var ClientConfig = z === null ? null : z.object({
+      identityCharLimit: z.number().default(4000),
+      restartTimeoutMs: z.number().default(90000),
+      restartPollMs: z.number().default(1000),
+      restartFillMs: z.number().default(600),
+      copyFeedbackMs: z.number().default(1600),
+    });
 
     // ===== 模块 1：会话身份（identity，含自动上线开关行、header/input 双入口）=====
     (function () {
@@ -207,6 +217,7 @@ window.__ModuleLoader__.load({
     var t = props.t;
     var scope = props.scope;
     var sessionId = props.sessionId;
+    var ctx = props.ctx;
     var snap = scope.getSnapshot();
     var v = (snap && snap.value && typeof snap.value === 'object') ? snap.value : {};
     var sessions = v.sessions && typeof v.sessions === 'object' ? v.sessions : {};
@@ -250,12 +261,12 @@ window.__ModuleLoader__.load({
           // P3-1：冲突/失败回滚开关并给出可见反馈
           setOn(prev);
           setErr(t('autoResumeError'));
-          setTimeout(function () { setErr(null); }, 2000);
+          ctx.timeout(function () { setErr(null); }, 2000);
         }
       }).catch(function () {
         setOn(prev);
         setErr(t('autoResumeError'));
-        setTimeout(function () { setErr(null); }, 2000);
+        ctx.timeout(function () { setErr(null); }, 2000);
       }).then(function () {
         setSaving(false);
       });
@@ -547,7 +558,7 @@ window.__ModuleLoader__.load({
           t('inheritDefault')),
         React.createElement('span', { className: 'si-inherit-hint' }, t('inheritDefaultHint'))),
       autoResumeScope ? React.createElement(AutoResumeRow, {
-        t: t, scope: autoResumeScope, sessionId: sessionId,
+        t: t, scope: autoResumeScope, sessionId: sessionId, ctx: ctx,
       }) : null,
       React.createElement('hr', { className: 'si-divider' }),
       React.createElement('div', { className: 'si-actions-between' },
@@ -578,7 +589,11 @@ window.__ModuleLoader__.load({
       React.createElement('span', null, toast.text));
   }
 
-  function apply(ctx) {
+  function apply(ctx, cfg) {
+    // Config 分键（client.identityCharLimit），缺省兜底默认值
+    var limit = (cfg && typeof cfg.identityCharLimit === 'number') ? cfg.identityCharLimit : 4000;
+    CHAR_LIMIT = limit;
+    CHAR_WARN_AT = Math.floor(limit * 0.8);
     injectCss();
     var locale = ctx.get('locale');
     var slots = ctx.get('slots');
@@ -930,7 +945,11 @@ collect('identity', apply);
     document.head.appendChild(style);
   }
 
-  function apply(ctx) {
+  function apply(ctx, cfg) {
+    // Config 分键（client.identityCharLimit），缺省兜底默认值
+    var limit = (cfg && typeof cfg.identityCharLimit === 'number') ? cfg.identityCharLimit : 4000;
+    CHAR_LIMIT = limit;
+    CHAR_WARN_AT = Math.floor(limit * 0.8);
     injectCss();
     var locale = ctx.get('locale');
     var slots = ctx.get('slots');
@@ -1028,6 +1047,10 @@ collect('global-prompt', apply);
     var react_jsx_runtime = require('react/jsx-runtime');
 
     var NS = 'web-restart-ui';
+    // 重启覆盖层可调参数（Config client 分键，apply 时赋值；组件渲染时读取）
+    var restartTimeoutMs = 90000;
+    var restartPollMs = 1000;
+    var restartFillMs = 600;
 
     var zh = {
       label: '重启服务',
@@ -1063,6 +1086,7 @@ collect('global-prompt', apply);
      */
     function RestartOverlay(props) {
       var t = props.t;
+      var ctx = props.ctx;
       var useState = react.useState;
       var useEffect = react.useEffect;
       var useRef = react.useRef;
@@ -1075,10 +1099,12 @@ collect('global-prompt', apply);
       var timedOut = timedOutState[0], setTimedOut = timedOutState[1];
 
       useEffect(function () {
+        // 定时器走 timer 服务（ctx.timeout/ctx.interval）：插件 fiber 生命周期兜底；
+        // cleanup 调用 disposer 停止（组件卸载即停，幂等）。
         var reloadTimer = null;
-        var timeoutTimer = setTimeout(function () { setTimedOut(true); }, 90000);
+        var timeoutTimer = ctx.timeout(function () { setTimedOut(true); }, restartTimeoutMs);
         // 轮询 1s：恢复检测更实时；成功即进入补满动画（600ms 后 reload）
-        var poll = setInterval(function () {
+        var poll = ctx.interval(function () {
           fetch('/api/restart', { method: 'GET', cache: 'no-store' })
             .then(function (r) { return r.ok; })
             .catch(function () { return false; })
@@ -1086,23 +1112,23 @@ collect('global-prompt', apply);
               if (ok) {
                 detectedAtRef.current = Date.now();
                 setDetected(true);
-                clearInterval(poll);
-                clearTimeout(timeoutTimer);
-                reloadTimer = setTimeout(function () { location.reload(); }, 600);
+                poll();
+                timeoutTimer();
+                reloadTimer = ctx.timeout(function () { location.reload(); }, restartFillMs);
               }
             });
-        }, 1000);
+        }, restartPollMs);
         return function () {
-          clearInterval(poll);
-          clearTimeout(timeoutTimer);
-          if (reloadTimer !== null) clearTimeout(reloadTimer);
+          poll();
+          timeoutTimer();
+          if (reloadTimer !== null) reloadTimer();
         };
       }, []);
 
       // 每秒 tick 驱动进度条推进
       useEffect(function () {
-        var iv = setInterval(function () { tickState[1](function (x) { return x + 1; }); }, 1000);
-        return function () { clearInterval(iv); };
+        var iv = ctx.interval(function () { tickState[1](function (x) { return x + 1; }); }, restartPollMs);
+        return function () { iv(); };
       }, []);
 
       // 探测驱动：未成功时平滑渐近 90% 上限；成功后 600ms 补满 90→100
@@ -1149,6 +1175,7 @@ collect('global-prompt', apply);
     /** 通用设置条目：说明 + 「重启服务」按钮；点击后进入全屏覆盖层。 */
     function WebRestartItem(props) {
       var t = props.t;
+      var ctx = props.ctx;
       var useState = react.useState;
       var phaseState = useState('idle');
       var phase = phaseState[0], setPhase = phaseState[1];
@@ -1175,14 +1202,17 @@ collect('global-prompt', apply);
               react_jsx_runtime.jsx('button', { type: 'button', className: 'wr-item-btn', disabled: phase !== 'idle', onClick: onClick, children: t('label') }),
             ],
           }),
-          phase === 'restarting' ? react_jsx_runtime.jsx(RestartOverlay, { t: t }) : null,
+          phase === 'restarting' ? react_jsx_runtime.jsx(RestartOverlay, { t: t, ctx: ctx }) : null,
         ],
       });
     }
 
     var inject = ['slots', 'locale'];
 
-    function apply(ctx) {
+    function apply(ctx, cfg) {
+      restartTimeoutMs = (cfg && typeof cfg.restartTimeoutMs === 'number') ? cfg.restartTimeoutMs : 90000;
+      restartPollMs = (cfg && typeof cfg.restartPollMs === 'number') ? cfg.restartPollMs : 1000;
+      restartFillMs = (cfg && typeof cfg.restartFillMs === 'number') ? cfg.restartFillMs : 600;
       injectCss();
       var locale = ctx.get('locale');
       var slots = ctx.get('slots');
@@ -1200,7 +1230,7 @@ collect('global-prompt', apply);
           label: function () { return t('label'); },
           locale: NS,
         }, function () {
-          return react_jsx_runtime.jsx(WebRestartItem, { t: t });
+          return react_jsx_runtime.jsx(WebRestartItem, { t: t, ctx: ctx });
         });
       });
     }
@@ -1396,20 +1426,26 @@ collect('log-reposition', apply);
     let react = require('react');
     let react_jsx_runtime = require('react/jsx-runtime');
     let primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+    // 复制反馈时长可调参数（Config client.copyFeedbackMs，apply 时赋值）
+    let copyFeedbackMs = 1600;
 
     /** Header action: copy this session's id to the clipboard, with a brief check mark feedback. */
-    function CopySessionIdAction({ sessionId }) {
+    function CopySessionIdAction({ sessionId, ctx }) {
       const [copied, setCopied] = react.useState(false);
       const timerRef = react.useRef(null);
       const onClick = () => {
         navigator.clipboard.writeText(String(sessionId)).then(() => {
           setCopied(true);
-          if (timerRef.current !== null) clearTimeout(timerRef.current);
-          timerRef.current = setTimeout(() => setCopied(false), 1600);
+          if (timerRef.current !== null) timerRef.current();
+          timerRef.current = ctx.timeout(() => setCopied(false), copyFeedbackMs);
         }).catch((error) => {
           console.error('[peer-message] copy session id failed:', error);
         });
       };
+      // 组件卸载时清理 timer disposer（ctx.timeout 属插件 fiber，组件卸载不自动清）
+      react.useEffect(function () {
+        return function () { if (timerRef.current !== null) timerRef.current(); };
+      }, []);
       return react_jsx_runtime.jsx('button', {
         type: 'button',
         onClick,
@@ -1436,12 +1472,13 @@ collect('log-reposition', apply);
 
     const inject = ['slots'];
 
-    function apply(ctx) {
+    function apply(ctx, cfg) {
+      copyFeedbackMs = (cfg && typeof cfg.copyFeedbackMs === 'number') ? cfg.copyFeedbackMs : 1600;
       ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
         name: 'conversation.session.header.actions',
         id: 'copy-session-id',
         order: 30
-      }, CopySessionIdAction));
+      }, function (props) { return react_jsx_runtime.jsx(CopySessionIdAction, { sessionId: props.sessionId, ctx: ctx }); }));
 
       // 工具行入口（方案 A：空白会话可见性）：与 header.actions 并存，复用同一组件
       // order 30 先于身份按钮（40），与 header.actions 的 30/40 显式区分保持一致
@@ -1449,18 +1486,20 @@ collect('log-reposition', apply);
         name: 'conversation.input.left',
         id: 'copy-session-id-input',
         order: 30
-      }, CopySessionIdAction));
+      }, function (props) { return react_jsx_runtime.jsx(CopySessionIdAction, { sessionId: props.sessionId, ctx: ctx }); }));
     }
 
 collect('peer-message', apply);
     })();
 
-    function apply(ctx) {
+    function apply(ctx, config) {
+      var clientCfg = (config && config.client && typeof config.client === 'object') ? config.client : {};
       Object.keys(registered).forEach(function (tag) {
-        try { registered[tag](ctx); } catch (e) { console.warn('[dsh-dev] client module ' + tag + ' apply failed: ' + (e && e.message ? e.message : String(e))); }
+        try { registered[tag](ctx, clientCfg); } catch (e) { console.warn('[dsh-session-toolkit] client module ' + tag + ' apply failed: ' + (e && e.message ? e.message : String(e))); }
       });
     }
     var inject = ['slots', 'locale', 'settingsScope', 'timer'];
+    if (ClientConfig !== null) exports.Config = ClientConfig;
     exports.apply = apply;
     exports.inject = inject;
     return module.exports;

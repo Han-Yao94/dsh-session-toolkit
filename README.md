@@ -1,118 +1,129 @@
 # dsh-session-toolkit
 
-> DeepSeek Harness 工作台插件整合包 · [English README](README.en.md)
+English | [中文](README.zh.md)
 
-将 6 个独立本地插件整合为一个统一插件的功能包:会话身份、全局提示词、会话自动恢复、Web 服务重启、Session log 按钮平移、会话间对等消息。
+Consolidated local plugin toolkit for the DeepSeek Harness web profile. Six previously separate local plugins — session identity, global prompt, session auto-resume, web restart service, Session-log button relocation, and peer-session messaging — merged into one package mounted through the profile's `cordis.patch.yml`.
 
-## ✨ 功能特性
+## Features
 
-| 功能 | 说明 |
-|---|---|
-| 会话身份 | 每会话人设注入(`systemPrompt` 段),支持浮层编辑与双入口按钮(会话头部/输入框左侧),每会话独立开关行 |
-| 全局提示词 | 设置页配置 + 系统提示词段注入,含 `/\{+/g` 连续花括号 sanitize 修复 |
-| 会话自动恢复 | 开关开启的会话在重启后自动 `resume`,带过滤链、并发控制与失败隔离 |
-| Web 服务重启 | 设置页一键重启 DSH Web 服务,零 UAC 提权,带覆盖层进度条 |
-| Session log 按钮平移 | 遮蔽官方 utilities 下载按钮,在 actions 槽复刻,复用官方 controller |
-| 会话间对等消息 | `send_to_session` / `list_sessions` 工具 + 复制会话 ID 按钮(双入口) |
+- **Session Identity** — a per-session persona prompt injected into that session's system prompt (independent section `session-identity`, order 55, resolved per agent at every assembly), with a default identity and per-session overrides. UI: identity dialog (enable switch, 4000-char soft limit, save/reset, edit default, inherit default) and status buttons in both `conversation.session.header.actions` (id `session-identity`, order 40) and `conversation.input.left` (id `session-identity-input`, order 40).
+- **Global Prompt** — a settings page (`settings.section`, id `global-prompt`, order 30) injecting one prompt into every conversation's system prompt (section `global-prompt`, order 50). `{` runs are spaced out (`/\{+/g`) to avoid prompt-variable conflicts.
+- **Session Auto-Resume** — sessions with the per-session switch on are resumed automatically after a GUI restart (`ctx.agents.resume`, carrying the default model from `agentDefaultModel`); switching a session on resumes it immediately (false→true edge). Filters: switch on, top-level only (no subagent origin, no `delegationDepth > 0`, no `parentSession`), non-blank (`seedLength !== 0`). Concurrency-bounded (`CONCURRENCY = 3`) with per-item failure isolation and an in-flight set against duplicate resume.
+- **Web Restart** — a "Restart service" entry in the General settings (`settings.general.item`, id `web-restart`, order 90) that restarts the GUI server with **no UAC prompt** (the spawn inherits the server process token, so the restart script's elevated branch is never reached) and shows a full-screen progress overlay (probe-driven progress, fill-up animation before reload, 90 s timeout fallback with manual refresh). Routes: `GET /api/restart` (health probe, constant 200) and `POST /api/restart` (trigger, 409 while a restart is in flight, 202 + 500 ms buffer before spawn).
+- **Session-Log Button Relocation** — shadows the official download button in `conversation.session.header.utilities` (same id `session-log-download`, priority −1, cell-shadowing) and registers a copy in `conversation.session.header.actions` (id `session-log-download-moved`, order 41), reusing the official `sessionLogDownload` controller (`ctx.get('sessionLogDownload')`) so download behavior stays identical to stock.
+- **Peer Messaging** — `send_to_session` / `list_sessions` tools on the host plane (session addressing by id or workspace path, wakeup delivery) plus a "copy session ID" button in both `conversation.session.header.actions` (id `copy-session-id`, order 30) and `conversation.input.left` (id `copy-session-id-input`, order 30). Outgoing message content is converted to plain text (`toPlainText`) before delivery so recipients see tidy text rather than raw markdown.
 
-## 📦 安装
+## Architecture
 
-1. 将本包放置到 DSH Web profile 的 `node_modules` 下:
+- **Host half** — `lib/index.js` composes six feature modules (`identity.js`, `global-prompt.js`, `auto-resume.js`, `web-restart.js`, `peer-message.js`, `log-reposition.js`). `inject` is the deduplicated union of module dependencies; each module's `apply` runs inside a `safe()` guard so one failing module never takes the whole package down. Every contribution is lifecycle-bound (`ctx.effect` for prompt sections and HTTP routes, plugin-fiber registrations for tools; timers go through the `timer` service).
+- **Client half** — `client/client.js` is a single `window.__ModuleLoader__.load` bundle; the five UI modules are inlined in IIFEs and collected into one `apply` that registers all slots in order (guarded per module). All UI uses `React.createElement`; styles are injected as `data-plugin` style tags with theme CSS variables and dark-mode coverage; no global DOM manipulation.
 
-   ```powershell
-   # 示例:Windows 用户目录下的 web profile
-   C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-toolkit
-   ```
+### Registered slots
 
-   推荐使用 junction 链接到源码目录,便于开发时热更新:
+| Slot | Id | Order / priority | Feature |
+|---|---|---|---|
+| `settings.section` | `global-prompt` | order 30 | Global Prompt page |
+| `settings.general.item` | `web-restart` | order 90 | Restart entry |
+| `conversation.session.header.actions` | `copy-session-id` | order 30 | Copy session ID |
+| `conversation.session.header.actions` | `session-identity` | order 40 | Identity button |
+| `conversation.session.header.actions` | `session-log-download-moved` | order 41 | Session log download |
+| `conversation.input.left` | `copy-session-id-input` | order 30 | Copy session ID (tool row) |
+| `conversation.input.left` | `session-identity-input` | order 40 | Identity button (tool row) |
+| `conversation.session.header.utilities` | `session-log-download` | priority −1 (shadow) | Hide stock button |
 
-   ```powershell
-   cmd /c mklink /J "C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-toolkit" "D:\path\to\dsh-session-toolkit"
-   ```
+## Configuration
 
-2. 在 profile 的 `cordis.patch.yml` 中注册插件:
+Settings namespaces (schema-validated, `applies: live`, persisted in `settings.yaml`):
 
-   ```yaml
-   - id: session-toolkit
-     name: 'dsh-session-toolkit'
-   ```
+| Namespace | Schema | Notes |
+|---|---|---|
+| `session-identity` | `{ default: {enabled: boolean, text: string}, sessions: Record<sessionId, {enabled, text}> }` | Resolution: session record → default → empty. Empty or disabled entries inject nothing. Identity text is clipped to 8000 chars (token guard). |
+| `session-auto-resume` | `{ sessions: Record<sessionId, boolean> }` | Switch per session; absent keys mean off. |
+| `global-prompt` | `{ enabled: boolean, content: string }` | Injected into every conversation when enabled. |
 
-3. 重启 DSH Web 服务(GUI 设置页或命令行)生效。
+### Plugin Config (cordis)
 
-> 原 6 个独立插件条目需从 `cordis.patch.yml` 移除(或保持 `disabled: true` 抑制,如官方 `dsh-global-prompt`),避免功能重复注册。
-
-## ⚙️ 配置
-
-所有配置经 `settings.yaml` 落盘,各命名空间与整合前完全兼容,已有数据保留。修改后多数配置实时生效(`applies: 'live'`)。
-
-### 会话身份 `session-identity`
+The plugin exposes a single `Config` (schemastery schema) with per-feature keys. Defaults equal current behavior; override via the plugin row's `config` in `cordis.yml` / `cordis.patch.yml` without touching code. The client half follows the same cordis mechanism (it exports `Config` and receives `config.client`); this package is the first local client consumer — if schemastery is unavailable in the client bundle, the client half degrades to defaults without exporting `Config`:
 
 ```yaml
-session-identity:
-  default:
-    enabled: true
-    text: "你是……"          # 未单独配置的会话使用默认身份
-  sessions:
-    "<sessionId>":
-      enabled: true
-      text: "本会话专属人设……"
+- id: session-toolkit
+  name: 'dsh-session-toolkit'
+  config:
+    identity:
+      maxText: 8000
+      sectionOrder: 55
+    globalPrompt:
+      sectionOrder: 50
+    autoResume:
+      concurrency: 3
+    webRestart:
+      scriptPath: ''          # optional; default derived as <DSH_HOME>/autostart/dsh-web-restart.cmd
+      spawnDelayMs: 500
+    client:
+      identityCharLimit: 4000
+      restartTimeoutMs: 90000
+      restartPollMs: 1000
+      restartFillMs: 600
+      copyFeedbackMs: 1600
 ```
 
-解析优先级:会话记录 → 默认身份;`enabled` 非 `true` 或文本为空 → 不注入。单条身份文本上限 8000 字符(超长自动截断并告警,防 token 成本失控)。
+| Key | Default | Meaning |
+|---|---|---|
+| `identity.maxText` | 8000 | Identity text clip limit (chars, token guard). |
+| `identity.sectionOrder` | 55 | System-prompt order of the identity section. |
+| `globalPrompt.sectionOrder` | 50 | System-prompt order of the global prompt section. |
+| `autoResume.concurrency` | 3 | Max in-flight resumes during startup restore. |
+| `webRestart.scriptPath` | derived | Restart script path; default `<DSH_HOME>/autostart/dsh-web-restart.cmd` via dsh-home-paths. |
+| `webRestart.spawnDelayMs` | 500 | Delay before spawning the restart script (202 buffer). |
+| `client.identityCharLimit` | 4000 | Identity editor character limit (UI soft limit). |
+| `client.restartTimeoutMs` | 90000 | Restart overlay timeout before the manual-refresh hint. |
+| `client.restartPollMs` | 1000 | Restart health-poll interval. |
+| `client.restartFillMs` | 600 | Progress fill animation after recovery detected. |
+| `client.copyFeedbackMs` | 1600 | Copy-feedback checkmark duration. |
 
-### 会话自动恢复 `session-auto-resume`
+## Deployment
 
-```yaml
-session-auto-resume:
-  sessions:
-    "<sessionId>": true
-```
+- Source root: `D:\dsh-session-toolkit`
+- Junction: `C:\Users\Francis Han\.dsh\profiles\web\node_modules\dsh-session-toolkit` → `D:\dsh-session-toolkit` (single source, no copies)
+- Dependency link: `D:\dsh-session-toolkit\node_modules` → `C:\Users\Francis Han\.dsh\profiles\node_modules` (resolves `@deepseek-ai/*` imports)
+- Composition: `cordis.patch.yml` registers one entry (`id: session-toolkit`, `name: 'dsh-session-toolkit'`). The original `dsh-global-prompt` package registers itself through its `dsh.bundle.patch`; that entry is suppressed with `- id: global-prompt / disabled: true` (a profile-level `disabled` overrides a bundle-layer insert).
 
-恢复过滤链:开关开启 + 顶层会话(非 subagent、无 parentSession)+ 非空白(`seedLength !== 0`)。开关关闭仅影响下次重启,不会下线当前会话。自动 resume 时携带默认模型(agentDefaultModel 的 provider/model/reasoningEffort),避免 `{{model}}` 变量无值导致 persona 段渲染失败;会话自定义模型仍走会话请求头/agent/request waterfall,与 GUI 打开行为一致。
+## Model Experience
 
-### 全局提示词 `global-prompt`
+### System prompt contributions
 
-```yaml
-global-prompt:
-  enabled: true
-  content: "你的全局提示词……"
-```
+#### What the model sees
 
-## 🚀 使用
+Two sections are contributed per assembly: `global-prompt` (order 50) and `session-identity` (order 55), placed after the deployment persona and before tool guidance (100–199). The identity section is resolved per agent (`AssembleContext.agent`) at assembly time from `session-identity` settings and is skipped for subagents (`origin`/`delegationDepth`). Empty sections are dropped at render.
 
-- **会话身份**:在会话头部操作区或输入框左侧点击身份按钮,浮层中编辑本会话人设,可一键启用/停用;身份随每轮请求实时注入。
-- **自动恢复**:在会话头部开关行开启后,重启 DSH 后该会话自动上线(并发上限 3)。
-- **重启服务**:设置页点击"重启服务",覆盖层进度条显示重启进度,90s 超时兜底。
-- **复制会话 ID**:会话头部操作区或输入框左侧按钮,点击复制当前会话 ID,配合 `send_to_session` 使用。
-- **会话间消息**:在任意会话中调用 `send_to_session` / `list_sessions` 工具,向其他会话发送或接收消息。
+#### Token effect
 
-## 🏗️ 架构
+Both sections repeat their text on every request when enabled. The global prompt applies to every conversation; the identity text applies only to sessions that resolve it (its own record or the default). Identity text is clipped to 8000 chars as a token guard.
 
-- **host 半**:`lib/index.js` 组装入口,按功能拆分 6 个子模块(`lib/identity.js`、`lib/global-prompt.js`、`lib/auto-resume.js`、`lib/web-restart.js`、`lib/log-reposition.js`、`lib/peer-message.js`),统一 inject 依赖,模块级 `safe()` 失败隔离。
-- **client 半**:`client/client.js` 单文件内联(`__ModuleLoader__` 只解析平台模块),注册 UI 插槽:
-  - `settings.section`:全局提示词(id `global-prompt`)
-  - `settings.general.item`:重启服务(id `web-restart`)
-  - `conversation.session.header.actions`:复制 ID(30)/ 身份(40)/ Session log(41)
-  - `conversation.input.left`:身份(40)/ 复制 ID(30)
-  - `conversation.session.header.utilities`:遮蔽官方下载按钮(id `session-log-download`,priority -1)
+#### KV Cache effect
 
-### ⚠️ 红线
+Each section's rendered text is a fixed part of the request prefix while its settings are unchanged; editing a session identity or the global prompt may invalidate provider cache reuse from the first changed token (same semantics as stock persona sections).
 
-- **自动恢复绝不调用 `dispose()`**:会从存储删除会话;关闭开关≠下线,仅影响下次重启。
-- **身份注入**:subagent(带 `origin` / `delegationDepth` 标记)不注入身份;`/\{+/g` 连续花括号会被空格化转义,避免被变量插值器误解析。
+### Tool surface
 
-## 🗑️ 卸载
+`send_to_session` and `list_sessions` are registered on the host plane and visible to every session (subagents inherit them through the standing preset composition). Their arguments and results are JSON-compatible.
 
-1. 从 `cordis.patch.yml` 移除 `session-toolkit` insert 条目(如需回退,恢复原插件注册条目)。
-2. 删除 profile `node_modules` 下的 `dsh-session-toolkit`(或移除 junction)。
-3. 重启 GUI 即回到整合前状态。
+## Mechanisms and Red Lines
 
-## ⚠️ 已知限制
+- **Identity injection** uses a single global section whose text provider resolves per agent — no per-agent registration, no lifecycle churn, real-time on settings change.
+- **Auto-resume never calls `dispose()`** — `AgentHandle.dispose()` removes the session from storage; turning a switch off only affects the next restart, it never takes a live session down.
+- **Restart is UAC-free by construction** — the spawn inherits the server process token (SYSTEM or user), so `taskkill` targets a same-privilege process and the script's elevated branch (the only UAC source) is unreachable. If port 3080 is held by another program, an elevated retry may still appear (documented in the restart script).
+- **Shadowing is cell-based** — the utilities entry re-registers the stock `session-log-download` cell at a lower priority; the stock entry abdicates gracefully if the shadow crashes.
+- **Plain-text conversion** — `toPlainText` (10 rules, code-fence state machine, loose matching) runs at send time only; the message structure and `source: { kind: 'user' }` are unchanged.
 
-- client 半为单文件内联,功能模块以代码注释分区;新增功能需同步维护 `lib/` 与 `client/client.js` 两处。
-- Session log 复刻按钮依赖官方 `sessionLogDownload` controller 接口,官方包升级若变更接口需同步(见 `lib/log-reposition.js` 注释)。
-- 身份注入每轮请求携带身份文本 token(与 persona/全局提示词一致)。
+## Known Limitations and Deferred Work
 
-## 📄 许可证
+- Client half is a hand-maintained single-file IIFE bundle; adding a feature touches both `lib/` and `client/client.js`.
+- The relocated Session-log button depends on the official `sessionLogDownload` controller interface; a stock upgrade that changes it requires a sync (see `lib/log-reposition.js`).
+- Loose emphasis matching in `toPlainText` can drop `*` pairs in non-format positions (e.g. `a * b * c`); acceptable for agent-generated messages, boundary tightening is optional.
+- The aggregate `inject` union waits for every listed service; a profile missing one service delays the whole package (web profile provides all of them today).
+- `ctx.get('agentDefaultModel')` is resolved at `apply` time (non-lazy); the gateway mounts the service before this package, so the web profile always has a value.
 
-[MIT](LICENSE)
+## Recovery
+
+Remove the `session-toolkit` entry from `cordis.patch.yml` (and re-enable the original plugins if their directories are still present), then restart the GUI to return to the pre-consolidation layout.

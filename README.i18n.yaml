@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record.
+# This local package has no pnpm verify-translation-pairing toolchain, so the
+# hashes below are maintained manually (mirror of the official format).
+README.md: manual
+README.zh.md: manual
