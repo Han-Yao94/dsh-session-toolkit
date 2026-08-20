@@ -68,7 +68,7 @@ session-auto-resume:
     "<sessionId>": true
 ```
 
-恢复过滤链:开关开启 + 顶层会话(非 subagent、无 parentSession)+ 非空白(`seedLength !== 0`)。开关关闭仅影响下次重启,不会下线当前会话。
+恢复过滤链:开关开启 + 顶层会话(非 subagent、无 parentSession)+ 非空白(`seedLength !== 0`)。开关关闭仅影响下次重启,不会下线当前会话。自动 resume 时携带默认模型(agentDefaultModel 的 provider/model/reasoningEffort),避免 `{{model}}` 变量无值导致 persona 段渲染失败;会话自定义模型仍走会话请求头/agent/request waterfall,与 GUI 打开行为一致。
 
 ### 全局提示词 `global-prompt`
 
