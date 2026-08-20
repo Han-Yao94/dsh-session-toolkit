@@ -1,0 +1,5 @@
+# dsh-session-toolkit bundle patch：组合包自注册（经 dsh plugin add 安装进 profile bundles）。
+# 保留 settings 命名空间（session-identity/session-auto-resume/global-prompt）与全部 slot id。
+- insert:
+    - id: session-toolkit
+      name: 'dsh-session-toolkit'

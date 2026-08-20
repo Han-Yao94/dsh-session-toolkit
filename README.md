@@ -83,10 +83,27 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 
 ## Deployment
 
+Official bundle form (recommended):
+
 - Source root: `D:\dsh-session-toolkit`
-- Junction: `C:\Users\Francis Han\.dsh\profiles\web\node_modules\dsh-session-toolkit` → `D:\dsh-session-toolkit` (single source, no copies)
-- Dependency link: `D:\dsh-session-toolkit\node_modules` → `C:\Users\Francis Han\.dsh\profiles\node_modules` (resolves `@deepseek-ai/*` imports)
-- Composition: `cordis.patch.yml` registers one entry (`id: session-toolkit`, `name: 'dsh-session-toolkit'`). The original `dsh-global-prompt` package registers itself through its `dsh.bundle.patch`; that entry is suppressed with `- id: global-prompt / disabled: true` (a profile-level `disabled` overrides a bundle-layer insert).
+- Install into a profile (pnpm link; single source, no copies):
+
+  ```powershell
+  dsh plugin --profile web add D:\dsh-session-toolkit
+  ```
+
+  This appends the package to the profile's `dsh.profile.bundles` and adds a `link:` dependency. The package's `dsh.bundle.patch` (`cordis.patch.yml`) registers the single entry (`id: session-toolkit`, `name: 'dsh-session-toolkit'`) as a **bundle layer** — applied after `dsh-base` / `dsh-web-app` and before the profile patch layer (layer order: bundles in sequence → profile patch → home patch → `--patch` overlay).
+
+- Uninstall: `dsh plugin --profile web remove dsh-session-toolkit`
+- From git/npm: pass the package reference instead of the local path (e.g. `dsh plugin --profile web add github:owner/dsh-session-toolkit`).
+
+Development alternative (non-official): manual junction instead of `dsh plugin add`:
+
+```powershell
+cmd /c mklink /J "C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-toolkit" "D:\dsh-session-toolkit"
+```
+
+plus `D:\dsh-session-toolkit\node_modules` → `C:\Users\<user>\.dsh\profiles\node_modules` for dependency resolution, and an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer the official `dsh plugin add` flow.
 
 ## Model Experience
 

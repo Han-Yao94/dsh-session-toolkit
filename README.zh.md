@@ -83,10 +83,27 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
 
 ## 部署
 
+官方组合包形态（推荐）：
+
 - 源码根目录：`D:\dsh-session-toolkit`
-- Junction：`C:\Users\Francis Han\.dsh\profiles\web\node_modules\dsh-session-toolkit` → `D:\dsh-session-toolkit`（单一源码，无副本漂移）
-- 依赖链接：`D:\dsh-session-toolkit\node_modules` → `C:\Users\Francis Han\.dsh\profiles\node_modules`（解析 `@deepseek-ai/*` 导入）
-- 组合注册：`cordis.patch.yml` 注册单一条目（`id: session-toolkit`，`name: 'dsh-session-toolkit'`）。原 `dsh-global-prompt` 包经其 `dsh.bundle.patch` 自注册，以 `- id: global-prompt / disabled: true` 抑制（profile 层 disabled 可覆盖 bundle 层 insert）。
+- 安装进 profile（pnpm link；单一源码，无副本漂移）：
+
+  ```powershell
+  dsh plugin --profile web add D:\dsh-session-toolkit
+  ```
+
+  该命令把包追加到 profile 的 `dsh.profile.bundles` 并添加 `link:` 依赖。包内 `dsh.bundle.patch`（`cordis.patch.yml`）注册单一条目（`id: session-toolkit`，`name: 'dsh-session-toolkit'`）作为 **bundle 层**——在 `dsh-base` / `dsh-web-app` 之后、profile patch 层之前应用（层序：bundles 按序 → profile patch → home patch → `--patch` overlay）。
+
+- 卸载：`dsh plugin --profile web remove dsh-session-toolkit`
+- git/npm 安装：以包引用代替本地路径（如 `dsh plugin --profile web add github:owner/dsh-session-toolkit`）。
+
+开发期备选（非官方）：手工 junction 代替 `dsh plugin add`：
+
+```powershell
+cmd /c mklink /J "C:\Users\<user>\.dsh\profiles\web\node_modules\dsh-session-toolkit" "D:\dsh-session-toolkit"
+```
+
+并配置 `D:\dsh-session-toolkit\node_modules` → `C:\Users\<user>\.dsh\profiles\node_modules` 供依赖解析，同时在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
 
 ## 模型体验
 

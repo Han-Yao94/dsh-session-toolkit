@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Unified local plugin: session identity, global prompt, auto-resume, web restart, session log reposition, peer message (6 plugins consolidated).",
   "license": "MIT",
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "README.en.md"
+  ],
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -11,6 +19,7 @@
     "./package.json": "./package.json"
   },
   "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
       "platform": "web",
       "inject": [
