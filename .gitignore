@@ -11,5 +11,7 @@ Thumbs.db
 .env
 .env.*
 
-# 本地 TLS 工具文件(沙箱环境使用)
+# 本地 TLS/SSH 工具文件(沙箱环境使用)
 ca-bundle.pem
+keys/
+.ssh/
