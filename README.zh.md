@@ -40,6 +40,9 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
 | `session-identity` | `{ default: {enabled: boolean, text: string}, sessions: Record<sessionId, {enabled, text}> }` | 解析顺序：会话记录 → 默认 → 空。禁用或空文本不注入。身份文本上限 8000 字符（token 守卫截断）。 |
 | `session-auto-resume` | `{ sessions: Record<sessionId, boolean> }` | 每会话开关；缺省键视为关闭。 |
 | `global-prompt` | `{ enabled: boolean, content: string }` | 启用时注入所有会话。 |
+| `file-blocklist` | `{ global: string[], sessions: Record<sessionId, string[]> }` | 屏蔽文件 glob 列表（`**`/`*`/`?`，路径大小写不敏感）。read/read_image 等工具可靠拦截；shell 命令文本启发式（字面路径包含或模式正则匹配）。**边界**：shell 间接读取（变量展开、改名复制、拼接）不保证拦截。 |
+
+文件屏蔽边界：read/read_image 可靠拦截；shell 间接读取（变量展开/改名复制/拼接）不保证——仅作启发式提示。
 
 ### 插件 Config（cordis）
 

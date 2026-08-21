@@ -40,6 +40,7 @@ Settings namespaces (schema-validated, `applies: live`, persisted in `settings.y
 | `session-identity` | `{ default: {enabled: boolean, text: string}, sessions: Record<sessionId, {enabled, text}> }` | Resolution: session record → default → empty. Empty or disabled entries inject nothing. Identity text is clipped to 8000 chars (token guard). |
 | `session-auto-resume` | `{ sessions: Record<sessionId, boolean> }` | Switch per session; absent keys mean off. |
 | `global-prompt` | `{ enabled: boolean, content: string }` | Injected into every conversation when enabled. |
+| `file-blocklist` | `{ global: string[], sessions: Record<sessionId, string[]> }` | Glob patterns of files never loaded into the model context (`**`/`*`/`?`, case-insensitive paths). Reliably blocked for read-like tools; shell command text heuristic (literal path inclusion or pattern regex). **Boundary**: shell indirect reads (variable expansion, renamed copies, concatenation) are not guaranteed. |
 
 ### Plugin Config (cordis)
 
