@@ -59,7 +59,6 @@ window.__ModuleLoader__.load({
     reset: '重置',
     unsaved: '未保存',
     close: '关闭',
-    hint: '内容中的 { 会被空格化（转义），避免与提示词变量冲突；修改后从下一轮对话开始生效。',
     autoResumeLabel: '重启后自动上线',
     autoResumeHint: '开启后，每次重启 GUI 该会话自动恢复在线；关闭不影响当前状态，仅影响下次重启。',
     autoResumeError: '保存失败，请重试',
@@ -104,7 +103,6 @@ window.__ModuleLoader__.load({
     reset: 'Reset',
     unsaved: 'Unsaved',
     close: 'Close',
-    hint: '{ characters are spaced out (escaped) to avoid conflicts with prompt variables; changes apply from the next turn.',
     autoResumeLabel: 'Auto-resume after restart',
     autoResumeHint: 'When on, this session resumes online automatically after each GUI restart; turning off does not affect the current state, only the next restart.',
     autoResumeError: 'Failed to save, please retry',
@@ -147,12 +145,6 @@ window.__ModuleLoader__.load({
       React.createElement('line', { x1: 12, y1: 17, x2: 12.01, y2: 17 }));
   }
 
-  function InfoIcon() {
-    return React.createElement('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-      React.createElement('circle', { cx: 12, cy: 12, r: 10 }),
-      React.createElement('line', { x1: 12, y1: 16, x2: 12, y2: 12 }),
-      React.createElement('line', { x1: 12, y1: 8, x2: 12.01, y2: 8 }));
-  }
 
   // 模块级浮层互斥：同一会话双入口（header/input.left）与跨会话共用一份"打开"状态，
   // 任一入口打开时其他入口同步关闭，避免多个浮层叠加、独立编辑态相互覆盖。
@@ -691,10 +683,7 @@ window.__ModuleLoader__.load({
           React.createElement('div', { className: 'si-label-row' },
             React.createElement('label', { className: 'si-label', htmlFor: 'si-area-default' }, t('contentLabel')),
             React.createElement('span', { className: countClass }, String(count) + ' 字符')),
-          React.createElement('textarea', { id: 'si-area-default', className: 'si-area', value: text, disabled: !enabled, spellCheck: false, placeholder: t('placeholder'), 'aria-describedby': 'si-hint-default', onChange: function (e) { setText(e.target.value); } }),
-          React.createElement('div', { id: 'si-hint-default', className: 'si-notice' },
-            React.createElement(InfoIcon, null),
-            React.createElement('span', { className: 'si-notice-text' }, t('hint')))),
+          React.createElement('textarea', { id: 'si-area-default', className: 'si-area', value: text, disabled: !enabled, spellCheck: false, placeholder: t('placeholder'), onChange: function (e) { setText(e.target.value); } })),
         React.createElement('hr', { className: 'si-divider' }),
         blocklistScope ? React.createElement(BlocklistEditor, {
           t: t, scope: blocklistScope, mode: 'global', ctx: ctx,
@@ -732,10 +721,7 @@ window.__ModuleLoader__.load({
         React.createElement('div', { className: 'si-label-row' },
           React.createElement('label', { className: 'si-label', htmlFor: 'si-area' }, t('contentLabel')),
           React.createElement('span', { className: countClass }, String(count) + ' 字符')),
-        React.createElement('textarea', { id: 'si-area', className: 'si-area', value: text, disabled: !enabled, spellCheck: false, placeholder: t('placeholder'), 'aria-describedby': 'si-hint', onChange: function (e) { setText(e.target.value); } }),
-        React.createElement('div', { id: 'si-hint', className: 'si-notice' },
-          React.createElement(InfoIcon, null),
-          React.createElement('span', { className: 'si-notice-text' }, t('hint')))),
+        React.createElement('textarea', { id: 'si-area', className: 'si-area', value: text, disabled: !enabled, spellCheck: false, placeholder: t('placeholder'), onChange: function (e) { setText(e.target.value); } })),
       React.createElement('div', { className: 'si-inherit' },
         React.createElement('button', { type: 'button', className: 'si-link', disabled: saving || !eff.customized, onClick: inheritDefault },
           t('inheritDefault')),
@@ -883,8 +869,6 @@ window.__ModuleLoader__.load({
     '.si-area{width:100%;min-height:140px;padding:12px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2,#DEE0E3);border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);font-family:inherit;font-size:14px;line-height:1.7;color:var(--dsw-alias-label-primary,#1F2329);resize:vertical;transition:border-color .2s ease,box-shadow .2s ease}',
     '.si-area::placeholder{color:var(--dsw-alias-label-secondary,#8F959E)}',
     '.si-area:focus{outline:none;border-color:#3370FF;box-shadow:0 0 0 3px rgba(51,112,255,.15)}',
-    '.si-notice{display:flex;align-items:flex-start;gap:8px;background:#F0F5FF;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.6;color:#4E5969}',
-    '.si-notice-text{min-width:0}',
     '.si-inherit{display:flex;flex-direction:column;gap:4px;margin-top:14px}',
     '.si-inherit-hint{font-size:12px;color:var(--dsw-alias-label-secondary,#8F959E)}',
     '.si-auto-resume{display:flex;align-items:flex-start;gap:12px;margin-top:14px}',
@@ -928,7 +912,7 @@ window.__ModuleLoader__.load({
     '.si-dot.off{background:var(--dsw-alias-label-secondary,#8F959E)}',
     '@keyframes si-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}',
     '@keyframes si-spin{to{transform:rotate(360deg)}}',
-    '@media (prefers-color-scheme:dark){.si-mask{background:rgba(0,0,0,.55)}.si-badge.custom{background:rgba(35,160,92,.18);color:#3CC97A}.si-badge.default{background:rgba(51,112,255,.16);color:#A8C2FF}.si-badge.off{background:#2A2E34;color:#A9AEB8}.si-notice{background:rgba(51,112,255,.16);color:#A8C2FF}}',
+    '@media (prefers-color-scheme:dark){.si-mask{background:rgba(0,0,0,.55)}.si-badge.custom{background:rgba(35,160,92,.18);color:#3CC97A}.si-badge.default{background:rgba(51,112,255,.16);color:#A8C2FF}.si-badge.off{background:#2A2E34;color:#A9AEB8}}',
   ].join('\n');
 
   var name = 'dsh-session-identity';
@@ -963,7 +947,6 @@ collect('identity', apply);
     saveError: '保存失败',
     loading: '加载中…',
     unavailable: '设置服务不可用',
-    hint: '内容中的 { 会被空格化（转义），避免与提示词变量冲突；修改后从下一轮对话开始生效。',
     reset: '重置',
     unsaved: '未保存',
   };
@@ -985,7 +968,6 @@ collect('identity', apply);
     saveError: 'Failed to save',
     loading: 'Loading…',
     unavailable: 'Settings service unavailable',
-    hint: '{ characters are spaced out (escaped) to avoid conflicts with prompt variables; changes apply from the next turn.',
     reset: 'Reset',
     unsaved: 'Unsaved',
   };
@@ -999,12 +981,6 @@ collect('identity', apply);
       React.createElement('path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' }));
   }
 
-  function InfoIcon() {
-    return React.createElement('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-      React.createElement('circle', { cx: 12, cy: 12, r: 10 }),
-      React.createElement('line', { x1: 12, y1: 16, x2: 12, y2: 12 }),
-      React.createElement('line', { x1: 12, y1: 8, x2: 12.01, y2: 8 }));
-  }
 
   function CheckIcon() {
     return React.createElement('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
@@ -1117,10 +1093,7 @@ collect('identity', apply);
           React.createElement('div', { className: 'gpui-label-row' },
             React.createElement('label', { className: 'gpui-label', htmlFor: 'gpui-area' }, t('contentLabel')),
             React.createElement('span', { className: countClass }, String(count) + ' ' + t('charUnit'))),
-          React.createElement('textarea', { id: 'gpui-area', className: 'gpui-area', value: content, disabled: disabled, spellCheck: false, placeholder: t('placeholder'), 'aria-describedby': 'gpui-hint', onChange: function (e) { setContent(e.target.value); } }),
-          React.createElement('div', { id: 'gpui-hint', className: 'gpui-notice' },
-            React.createElement(InfoIcon, null),
-            React.createElement('span', { className: 'gpui-notice-text' }, t('hint')))),
+          React.createElement('textarea', { id: 'gpui-area', className: 'gpui-area', value: content, disabled: disabled, spellCheck: false, placeholder: t('placeholder'), onChange: function (e) { setContent(e.target.value); } })),
 
         React.createElement('hr', { className: 'gpui-divider' }),
 
@@ -1210,9 +1183,6 @@ collect('identity', apply);
     '.gpui-area{width:100%;min-height:160px;padding:12px;box-sizing:border-box;border:1px solid var(--gpui-border-input);border-radius:8px;background:var(--gpui-bg-card);font-family:inherit;font-size:14px;line-height:1.7;color:var(--gpui-text-title);resize:vertical;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease,color .2s ease}',
     '.gpui-area::placeholder{color:var(--gpui-text-sub)}',
     '.gpui-area:focus{outline:none;border-color:var(--gpui-primary);box-shadow:0 0 0 3px var(--gpui-primary-ring)}',
-    '.gpui-notice{display:flex;align-items:flex-start;gap:8px;background:var(--gpui-info-bg);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.6;color:var(--gpui-info-text);transition:background .2s ease,color .2s ease}',
-    '.gpui-notice-icon{flex:none;margin-top:2px}',
-    '.gpui-notice-text{min-width:0}',
     '.gpui-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px}',
     '.gpui-unsaved{font-size:12px;color:var(--gpui-warn);transition:color .2s ease}',
     '.gpui-btn{height:36px;padding:0 20px;border-radius:8px;border:1px solid transparent;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:background .2s ease,color .2s ease,border-color .2s ease,transform .1s ease}',
