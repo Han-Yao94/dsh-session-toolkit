@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-toolkit",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Unified local plugin: session identity, global prompt, auto-resume, web restart, session log reposition, peer message (6 plugins consolidated).",
   "license": "MIT",
   "author": "dsh-session-toolkit maintainers",

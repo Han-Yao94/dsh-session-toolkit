@@ -119,7 +119,7 @@ dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
 
 ### 分享与安装
 
-已发布至 **npm**（`dsh-session-toolkit`，v0.1.2，MIT）并同步至 **GitHub**（`github.com/Han-Yao94/dsh-session-toolkit`）。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+已发布至 **npm**（`dsh-session-toolkit`，v0.1.3，MIT）并同步至 **GitHub**（`github.com/Han-Yao94/dsh-session-toolkit`）。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
 
 - **npm**：消费者 `dsh plugin --profile <name> add dsh-session-toolkit` 安装；新版本通过 `npm publish`（或 `pnpm publish`）发布。
 - **GitHub**：`dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit`。
