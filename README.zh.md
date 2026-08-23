@@ -6,7 +6,7 @@ DeepSeek Harness 插件整合包。将六个此前相互独立的本地插件—
 
 ## 功能特性
 
-- **会话身份** — 每会话人设提示词注入该会话系统提示词（独立段 `session-identity`，order 55，每次组装按 agent 求值），支持默认身份与每会话覆盖。UI：身份浮层（启用开关、4000 字符软上限、保存/重置、编辑默认身份、继承默认身份）及双入口状态按钮：`conversation.session.header.actions`（id `session-identity`，order 40）与 `conversation.input.left`（id `session-identity-input`，order 40）。
+- **会话身份** — 每会话人设提示词注入该会话系统提示词（独立段 `session-identity`，order 40，每次组装按 agent 求值），支持默认身份与每会话覆盖。UI：身份浮层（启用开关、4000 字符软上限、保存/重置、编辑默认身份、继承默认身份）及双入口状态按钮：`conversation.session.header.actions`（id `session-identity`，order 40）与 `conversation.input.left`（id `session-identity-input`，order 40）。
 - **全局提示词** — 设置页（`settings.section`，id `global-prompt`，order 30）配置一段注入所有会话系统提示词的文本（段 `global-prompt`，order 50）。连续 `{` 被空格化（`/\{+/g`），避免与提示词变量冲突。
 - **会话自动上线** — 开启每会话开关的会话在 GUI 重启后自动 resume（`ctx.agents.resume`，携带 `agentDefaultModel` 默认模型）；开关从关→开时立即生效。过滤链：开关开启 + 仅顶层（非 subagent origin、`delegationDepth <= 0`、无 `parentSession`）+ 非空白（`seedLength !== 0`）。并发受限（`CONCURRENCY = 3`）、单项失败隔离、in-flight 集合防重复 resume。
 - **Web 重启服务** — 通用设置中的「重启服务」条目（`settings.general.item`，id `web-restart`，order 90），**无 UAC 弹窗**（spawn 继承服务器进程 token，重启脚本的提权分支不会触达），带全屏进度覆盖层（探测驱动进度、刷新前补满动画、90s 超时兜底 + 手动刷新）。路由：`GET /api/restart`（健康探测，恒 200）与 `POST /api/restart`（触发，进行中返回 409，202 后 500ms 缓冲再 spawn）。恢复以**先中断后恢复**判定：覆盖层仅在观测到探测连续失败 `client.restartFailThreshold` 次、随后再次返回 200 时才刷新；若探测全程可达则判定"未检测到重启"（`noRestart`），直至超时并提示手动刷新。
@@ -40,6 +40,10 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
 | `session-identity` | `{ default: {enabled: boolean, text: string}, sessions: Record<sessionId, {enabled, text}> }` | 解析顺序：会话记录 → 默认 → 空。禁用或空文本不注入。身份文本上限 8000 字符（token 守卫截断）。 |
 | `session-auto-resume` | `{ sessions: Record<sessionId, boolean> }` | 每会话开关；缺省键视为关闭。 |
 | `global-prompt` | `{ enabled: boolean, content: string }` | 启用时注入所有会话。 |
+| `workspace-prompt` | `{ workspaces: Record<path,{enabled, content}>, removed: string[] }` | 按工作区的提示词。某会话会得到与其 cwd 目录前缀匹配、路径最深（最具体）且启用的工作区内容。`removed` 记录用户已移除的路径，使活跃工作区同步不重新补回。 |
+| `workspace-registry-active` | `{ active: [{path, sessionCount}] }` | 活跃工作区只读投影（来自 `workspaceRegistry.list()`），供设置界面显示活跃会话数；`workspaceRegistry` 缺失时降级。 |
+| `workspace-prompt` | `{ workspaces: Record<path,{enabled, content}>, removed: string[] }` | 按工作区的提示词。某会话会得到与其 cwd 目录前缀匹配、路径最深（最具体）且启用的工作区内容。`removed` 记录用户已移除的路径，使活跃工作区同步不重新补回。 |
+| `workspace-registry-active` | `{ active: [{path, sessionCount}] }` | 活跃工作区只读投影（来自 `workspaceRegistry.list()`），供设置界面显示活跃会话数；`workspaceRegistry` 缺失时降级。 |
 | `file-blocklist` | `{ global: string[], sessions: Record<sessionId, string[]> }` | 屏蔽文件 glob 列表（`**`/`*`/`?`，路径大小写不敏感）。read/read_image 等工具可靠拦截；shell 命令文本启发式（字面路径包含或模式正则匹配）。**边界**：shell 间接读取（变量展开、改名复制、拼接）不保证拦截。 |
 
 文件屏蔽边界：read/read_image 可靠拦截；shell 间接读取（变量展开/改名复制/拼接）不保证——仅作启发式提示。
@@ -54,9 +58,10 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
   config:
     identity:
       maxText: 8000
-      sectionOrder: 55
+      sectionOrder: 40
     globalPrompt:
       sectionOrder: 50
+      workspaceSectionOrder: 60
     autoResume:
       concurrency: 3
     webRestart:
@@ -74,8 +79,11 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
 | 键 | 默认值 | 含义 |
 |---|---|---|
 | `identity.maxText` | 8000 | 身份文本截断上限（字符，token 守卫）。 |
-| `identity.sectionOrder` | 55 | 身份段在系统提示词中的顺序。 |
+| `identity.sectionOrder` | 40 | 身份段在系统提示词中的顺序。**迁移**：显式固定 `identity.sectionOrder: 55` 的用户需改为 40 以保持「身份 → 全局 → 工作区」顺序。 |
 | `globalPrompt.sectionOrder` | 50 | 全局提示词段的顺序。 |
+| `globalPrompt.workspaceSectionOrder` | 60 | 工作区提示词段的顺序（置于最后）。 |
+| `globalPrompt.workspaceSectionOrder` | 60 | 工作区提示词段的顺序（置于最后）。 |
+| `globalPrompt.workspaceSectionOrder` | 60 | 工作区提示词段的顺序（置于最后）。 |
 | `autoResume.concurrency` | 3 | 启动恢复的最大在途 resume 数。 |
 | `webRestart.scriptPath` | 推导 | 重启脚本路径；缺省 `<DSH_HOME>/autostart/dsh-web-restart.cmd`（经 dsh-home-paths）。 |
 | `webRestart.spawnDelayMs` | 500 | 202 缓冲后 spawn 重启脚本的延迟。 |
@@ -125,11 +133,11 @@ dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
 
 #### 模型看到的内容
 
-每次组装贡献两个段：`global-prompt`（order 50）与 `session-identity`（order 55），位于部署 persona 之后、工具引导（100–199）之前。身份段在组装时按 agent（`AssembleContext.agent`）从 `session-identity` 设置解析，subagent（`origin`/`delegationDepth`）跳过。空段在渲染时删除。
+每次组装贡献三个段，顺序：`session-identity`（order 40）→ `global-prompt`（order 50）→ `workspace-prompt`（order 60），位于部署 persona 之后、工具引导（100–199）之前。身份段在组装时按 agent（`AssembleContext.agent`）从 `session-identity` 设置解析，subagent（`origin`/`delegationDepth`）跳过。工作区段为 cwd 前缀匹配到配置工作区（取路径最深/最具体且启用者）的会话注入该工作区内容，否则为空。空段在渲染时删除。
 
 #### Token 影响
 
-启用时两个段的文本随每次请求重复。全局提示词作用于所有会话；身份文本仅作用于能解析到它的会话（自身记录或默认）。身份文本上限 8000 字符（token 守卫）。
+启用时三个段的文本随每次请求重复。全局提示词作用于所有会话；身份文本仅作用于能解析到它的会话（自身记录或默认）；工作区文本仅作用于 cwd 前缀匹配到已启用且已配置工作区（取最具体）的会话。身份文本上限 8000 字符（token 守卫）。
 
 #### KV Cache 影响
 

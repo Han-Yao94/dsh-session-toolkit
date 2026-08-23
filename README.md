@@ -6,8 +6,8 @@ Consolidated plugin toolkit for the DeepSeek Harness. Six previously separate lo
 
 ## Features
 
-- **Session Identity** — a per-session persona prompt injected into that session's system prompt (independent section `session-identity`, order 55, resolved per agent at every assembly), with a default identity and per-session overrides. UI: identity dialog (enable switch, 4000-char soft limit, save/reset, edit default, inherit default) and status buttons in both `conversation.session.header.actions` (id `session-identity`, order 40) and `conversation.input.left` (id `session-identity-input`, order 40).
-- **Global Prompt** — a settings page (`settings.section`, id `global-prompt`, order 30) injecting one prompt into every conversation's system prompt (section `global-prompt`, order 50). `{` runs are spaced out (`/\{+/g`) to avoid prompt-variable conflicts.
+- **Session Identity** — a per-session persona prompt injected into that session's system prompt (independent section `session-identity`, order 40, resolved per agent at every assembly), with a default identity and per-session overrides. UI: identity dialog (enable switch, 4000-char soft limit, save/reset, edit default, inherit default) and status buttons in both `conversation.session.header.actions` (id `session-identity`, order 40) and `conversation.input.left` (id `session-identity-input`, order 40).
+- **Global Prompt** — a settings page (`settings.section`, id `global-prompt`, order 30) injecting one prompt into every conversation's system prompt (section `global-prompt`, order 50). `{` runs are spaced out (`/\{+/g`) to avoid prompt-variable conflicts. A per-**workspace** variant injects a workspace-specific prompt (section `workspace-prompt`, order 60) for sessions whose `cwd` prefix-matches a configured workspace (most-specific match wins).
 - **Session Auto-Resume** — sessions with the per-session switch on are resumed automatically after a GUI restart (`ctx.agents.resume`, carrying the default model from `agentDefaultModel`); switching a session on resumes it immediately (false→true edge). Filters: switch on, top-level only (no subagent origin, no `delegationDepth > 0`, no `parentSession`), non-blank (`seedLength !== 0`). Concurrency-bounded (`CONCURRENCY = 3`) with per-item failure isolation and an in-flight set against duplicate resume.
 - **Web Restart** — a "Restart service" entry in the General settings (`settings.general.item`, id `web-restart`, order 90) that restarts the GUI server with **no UAC prompt** (the spawn inherits the server process token, so the restart script's elevated branch is never reached) and shows a full-screen progress overlay (probe-driven progress, fill-up animation before reload, 90 s timeout fallback with manual refresh). Routes: `GET /api/restart` (health probe, constant 200) and `POST /api/restart` (trigger, 409 while a restart is in flight, 202 + 500 ms buffer before spawn). Recovery is detected by **interruption-then-restore**: the overlay only reloads after it observes the probe fail for `client.restartFailThreshold` consecutive checks and then return 200 again; if the probe is reachable the whole time it reports "no restart detected" (`noRestart`) until the timeout, offering a manual refresh.
 - **Session-Log Button Relocation** — shadows the official download button in `conversation.session.header.utilities` (same id `session-log-download`, priority −1, cell-shadowing) and registers a copy in `conversation.session.header.actions` (id `session-log-download-moved`, order 41), reusing the official `sessionLogDownload` controller (`ctx.get('sessionLogDownload')`) so download behavior stays identical to stock.
@@ -40,6 +40,8 @@ Settings namespaces (schema-validated, `applies: live`, persisted in `settings.y
 | `session-identity` | `{ default: {enabled: boolean, text: string}, sessions: Record<sessionId, {enabled, text}> }` | Resolution: session record → default → empty. Empty or disabled entries inject nothing. Identity text is clipped to 8000 chars (token guard). |
 | `session-auto-resume` | `{ sessions: Record<sessionId, boolean> }` | Switch per session; absent keys mean off. |
 | `global-prompt` | `{ enabled: boolean, content: string }` | Injected into every conversation when enabled. |
+| `workspace-prompt` | `{ workspaces: Record<path,{enabled, content}>, removed: string[] }` | Per-workspace prompts. A session gets the most-specific (longest matching path) enabled workspace whose directory prefix-matches its `cwd`. `removed` lists paths the user removed so active-workspace sync never re-adds them. |
+| `workspace-registry-active` | `{ active: [{path, sessionCount}] }` | Read-only projection of live workspaces from `workspaceRegistry.list()` for the settings UI to show Active workstate session counts; degrades when `workspaceRegistry` is absent. |
 | `file-blocklist` | `{ global: string[], sessions: Record<sessionId, string[]> }` | Glob patterns of files never loaded into the model context (`**`/`*`/`?`, case-insensitive paths). Reliably blocked for read-like tools; shell command text heuristic (literal path inclusion or pattern regex). **Boundary**: shell indirect reads (variable expansion, renamed copies, concatenation) are not guaranteed. |
 
 ### Plugin Config (cordis)
@@ -52,9 +54,10 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
   config:
     identity:
       maxText: 8000
-      sectionOrder: 55
+      sectionOrder: 40
     globalPrompt:
       sectionOrder: 50
+      workspaceSectionOrder: 60
     autoResume:
       concurrency: 3
     webRestart:
@@ -72,8 +75,9 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 | Key | Default | Meaning |
 |---|---|---|
 | `identity.maxText` | 8000 | Identity text clip limit (chars, token guard). |
-| `identity.sectionOrder` | 55 | System-prompt order of the identity section. |
+| `identity.sectionOrder` | 40 | System-prompt order of the identity section. **Migration**: users who explicitly pinned `identity.sectionOrder: 55` must set it to 40 to keep the identity-before-global ordering. |
 | `globalPrompt.sectionOrder` | 50 | System-prompt order of the global prompt section. |
+| `globalPrompt.workspaceSectionOrder` | 60 | System-prompt order of the workspace prompt section (placed last). |
 | `autoResume.concurrency` | 3 | Max in-flight resumes during startup restore. |
 | `webRestart.scriptPath` | derived | Restart script path; default `<DSH_HOME>/autostart/dsh-web-restart.cmd` via dsh-home-paths. |
 | `webRestart.spawnDelayMs` | 500 | Delay before spawning the restart script (202 buffer). |
@@ -123,11 +127,11 @@ Runtime dependencies (`@deepseek-ai/schemastery`, `@deepseek-ai/dsh-tools`, `@de
 
 #### What the model sees
 
-Two sections are contributed per assembly: `global-prompt` (order 50) and `session-identity` (order 55), placed after the deployment persona and before tool guidance (100–199). The identity section is resolved per agent (`AssembleContext.agent`) at assembly time from `session-identity` settings and is skipped for subagents (`origin`/`delegationDepth`). Empty sections are dropped at render.
+Three sections are contributed per assembly, in order: `session-identity` (order 40) -> `global-prompt` (order 50) -> `workspace-prompt` (order 60), placed after the deployment persona and before tool guidance (100–199). The identity section is resolved per agent (`AssembleContext.agent`) at assembly time from `session-identity` settings and is skipped for subagents (`origin`/`delegationDepth`). The workspace section injects the most-specific (longest matching path) enabled workspace prompt for a session whose `cwd` prefix-matches a configured workspace; otherwise nothing. Empty sections are dropped at render.
 
 #### Token effect
 
-Both sections repeat their text on every request when enabled. The global prompt applies to every conversation; the identity text applies only to sessions that resolve it (its own record or the default). Identity text is clipped to 8000 chars as a token guard.
+All three sections repeat their text on every request when enabled. The global prompt applies to every conversation; the identity text applies only to sessions that resolve it (its own record or the default); the workspace text applies only to sessions whose `cwd` prefix-matches an enabled configured workspace (most-specific match wins). Identity text is clipped to 8000 chars as a token guard.
 
 #### KV Cache effect
 

@@ -49,6 +49,7 @@ window.__ModuleLoader__.load({
     editDefault: '编辑默认身份',
     backToSession: '返回会话身份',
     save: '保存',
+    autoSaved: '已自动保存',
     saving: '保存中…',
     savedToast: '已保存',
     savedInheritToast: '已恢复默认身份',
@@ -93,6 +94,7 @@ window.__ModuleLoader__.load({
     editDefault: 'Edit default identity',
     backToSession: 'Back to session identity',
     save: 'Save',
+    autoSaved: 'Auto-saved',
     saving: 'Saving…',
     savedToast: 'Saved',
     savedInheritToast: 'Restored to default',
@@ -838,13 +840,13 @@ window.__ModuleLoader__.load({
 
   var CSS = [
     '.si-mask{position:fixed;inset:0;z-index:14000;background:rgba(15,23,42,.38);display:flex;align-items:flex-start;justify-content:center;padding:9vh 24px 24px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}',
-    '.si-card{width:560px;max-width:100%;max-height:82vh;overflow:auto;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l1,#E5E6EB);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.18);padding:24px 28px;box-sizing:border-box;color:var(--dsw-alias-label-primary,#1F2329);font-size:14px;line-height:1.6;animation:si-in .18s ease;outline:none}',
+    '.si-card{width:560px;max-width:100%;max-height:82vh;overflow:auto;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.18);padding:24px 28px;box-sizing:border-box;color:var(--dsw-alias-label-primary);font-size:14px;line-height:1.6;animation:si-in .18s ease;outline:none}',
     '.si-head{display:flex;flex-direction:column}',
     '.si-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
     '.si-title-group{display:flex;align-items:center;gap:8px;min-width:0;color:var(--dsw-alias-label-primary,#1F2329)}',
     '.si-title{margin:0;font-size:18px;font-weight:600;line-height:1.3}',
-    '.si-back,.si-close{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#646A73);cursor:pointer;transition:background .15s ease,color .15s ease}',
-    '.si-back:hover,.si-close:hover{background:var(--dsw-alias-bg-hover,#F2F3F5);color:var(--dsw-alias-label-primary,#1F2329)}',
+    '.si-back,.si-close{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .15s ease,color .15s ease}',
+    '.si-back:hover,.si-close:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary,#1F2329)}',
     '.si-desc{margin:6px 0 0;font-size:13px;line-height:1.6;color:var(--dsw-alias-label-secondary,#646A73)}',
     '.si-badge{flex:none;height:24px;line-height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}',
     '.si-badge.custom{background:#E8F7EE;color:#23A05C}',
@@ -852,7 +854,7 @@ window.__ModuleLoader__.load({
     '.si-badge.off{background:#F2F3F5;color:#86909C}',
     '.si-divider{height:1px;border:none;background:var(--dsw-alias-border-l1,#F0F1F3);margin:18px 0;flex:none}',
     '.si-enable{display:flex;align-items:flex-start;gap:12px}',
-    '.si-switch{position:relative;flex:none;width:40px;height:22px;margin-top:2px;padding:0;border:none;border-radius:999px;background:var(--dsw-alias-border-l2,#DEE0E3);cursor:pointer;transition:background .2s ease;box-sizing:border-box}',
+    '.si-switch{position:relative;flex:none;width:40px;height:22px;margin-top:2px;padding:0;border:none;border-radius:999px;background:var(--dsw-alias-border-l2);cursor:pointer;transition:background .2s ease;box-sizing:border-box}',
     '.si-switch.on{background:#3370FF}',
     '.si-switch-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);transition:transform .2s ease}',
     '.si-switch.on .si-switch-thumb{transform:translateX(18px)}',
@@ -866,7 +868,7 @@ window.__ModuleLoader__.load({
     '.si-count{font-size:12px;color:var(--dsw-alias-label-secondary,#8F959E);font-variant-numeric:tabular-nums}',
     '.si-count-warn{color:#F59E0B}',
     '.si-count-error{color:#F53F3F}',
-    '.si-area{width:100%;min-height:140px;padding:12px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2,#DEE0E3);border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);font-family:inherit;font-size:14px;line-height:1.7;color:var(--dsw-alias-label-primary,#1F2329);resize:vertical;transition:border-color .2s ease,box-shadow .2s ease}',
+    '.si-area{width:100%;min-height:140px;padding:12px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);font-family:inherit;font-size:14px;line-height:1.7;color:var(--dsw-alias-label-primary);resize:vertical;transition:border-color .2s ease,box-shadow .2s ease}',
     '.si-area::placeholder{color:var(--dsw-alias-label-secondary,#8F959E)}',
     '.si-area:focus{outline:none;border-color:#3370FF;box-shadow:0 0 0 3px rgba(51,112,255,.15)}',
     '.si-inherit{display:flex;flex-direction:column;gap:4px;margin-top:14px}',
@@ -880,8 +882,8 @@ window.__ModuleLoader__.load({
     '.si-actions-between{display:flex;align-items:center;justify-content:space-between;gap:12px}',
     '.si-unsaved{font-size:12px;color:#F59E0B}',
     '.si-btn{height:36px;padding:0 20px;border-radius:8px;border:1px solid transparent;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:background .2s ease,color .2s ease,border-color .2s ease,transform .1s ease}',
-    '.si-reset{background:transparent;color:var(--dsw-alias-label-secondary,#646A73);border-color:var(--dsw-alias-border-l2,#DEE0E3)}',
-    '.si-reset:hover{background:var(--dsw-alias-bg-hover,#F2F3F5);color:var(--dsw-alias-label-primary,#1F2329)}',
+    '.si-reset{background:transparent;color:var(--dsw-alias-label-secondary);border-color:var(--dsw-alias-border-l2,#DEE0E3)}',
+    '.si-reset:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary,#1F2329)}',
     '.si-reset:active{transform:translateY(1px)}',
     '.si-save{background:#3370FF;color:#fff}',
     '.si-save:hover:not(:disabled){background:#2860E1}',
@@ -889,7 +891,7 @@ window.__ModuleLoader__.load({
     '.si-save:disabled{cursor:not-allowed;opacity:.45}',
     '.si-spinner{display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:-2px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:si-spin .6s linear infinite}',
     '.si-btn:focus-visible,.si-switch:focus-visible,.si-link:focus-visible,.si-back:focus-visible,.si-close:focus-visible{outline:2px solid #3370FF;outline-offset:2px}',
-    '.si-toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:15000;display:flex;align-items:center;gap:8px;padding:10px 20px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l1,#E5E6EB);box-shadow:0 4px 16px rgba(0,0,0,.12);font-size:14px;animation:si-in .18s ease}',
+    '.si-toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:15000;display:flex;align-items:center;gap:8px;padding:10px 20px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l1);box-shadow:0 4px 16px rgba(0,0,0,.12);font-size:14px;animation:si-in .18s ease}',
     '.si-toast.ok{color:#23A05C}',
     '.si-toast.err{color:#F53F3F}',
     '.si-busy{padding:48px 24px;text-align:center;color:var(--dsw-alias-label-secondary,#646A73)}',
@@ -901,7 +903,7 @@ window.__ModuleLoader__.load({
     '.si-blocklist-input:focus{outline:none;border-color:#3370FF;box-shadow:0 0 0 3px rgba(51,112,255,.15)}',
     '.si-blocklist-add{flex:none;height:30px;padding:0 14px;border:none;border-radius:6px;background:#3370FF;color:#fff;font-size:13px;cursor:pointer}',
     '.si-blocklist-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}',
-    '.si-blocklist-item{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-hover,#F2F3F5);font-size:12px}',
+    '.si-blocklist-item{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-2);font-size:12px}',
     '.si-blocklist-item-text{flex:1;min-width:0;overflow-wrap:break-word;color:var(--dsw-alias-label-primary)}',
     '.si-blocklist-remove{flex:none;border:none;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:14px;line-height:1}',
     '.si-blocklist-err{font-size:12px;color:#F53F3F}',
@@ -927,60 +929,84 @@ collect('identity', apply);
   var exports = module.exports;
   Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
   var React = require('react');
+  var primitives = require('@deepseek-ai/dsh-client-ui-primitives');
 
   var NS = 'global-prompt-ui';
 
   var zh = {
     nav: '全局提示词',
     title: '全局提示词',
-    desc: '为所有会话注入一段全局提示词：追加到系统提示词，作用于每一次模型调用。',
+    tabGlobal: '全局',
+    tabWorkspace: '按工作区',
+    desc: '为所有会话注入一段全局提示词，并为指定工作区注入专属提示词。',
+    scopeOrder: '按 会话身份 → 全局 → 工作区 顺序拼接。',
     badgeOn: '已启用',
     badgeOff: '已关闭',
     enableLabel: '启用全局提示词',
     enableHint: '关闭后，提示词不会注入到任何会话。',
+    workspaceEnableHint: '开启后，以该工作区为根目录的会话会注入此提示词。',
     contentLabel: '提示词内容',
     charUnit: '字符',
-    placeholder: '输入全局提示词内容，例如：始终使用简体中文回答……',
+    filesLabel: '引用文件',
+    addFile: '添加文件',
+    filePlaceholder: '输入文件路径',
+    readFail: '读取失败',
+    readPending: '未读取',
+    placeholder: '输入提示词内容，例如：始终使用简体中文回答……',
     save: '保存',
+    autoSaved: '已自动保存',
     saving: '保存中…',
     savedToast: '已保存',
     saveError: '保存失败',
+    conflict: '保存冲突，请重试',
     loading: '加载中…',
     unavailable: '设置服务不可用',
     reset: '重置',
     unsaved: '未保存',
+    emptyWorkspaces: '暂无活跃工作区',
+    inactive: '未活跃',
+    remove: '移除',
+    sessionUnit: '个会话',
   };
 
   var en = {
     nav: 'Global Prompt',
     title: 'Global Prompt',
-    desc: 'Inject a global prompt into every conversation: appended to the system prompt, applied to every model call.',
+    tabGlobal: 'Global',
+    tabWorkspace: 'Per workspace',
+    desc: 'Inject a global prompt into every conversation and per-workspace prompts for specific workspaces.',
+    scopeOrder: 'Assembled in order: session identity → global → workspace.',
     badgeOn: 'Enabled',
     badgeOff: 'Disabled',
     enableLabel: 'Enable global prompt',
     enableHint: 'When off, the prompt is not injected into any conversation.',
+    workspaceEnableHint: 'When on, conversations rooted at this workspace get this prompt.',
     contentLabel: 'Prompt content',
     charUnit: 'chars',
-    placeholder: 'Enter the global prompt content, e.g. Always answer in English…',
+    filesLabel: 'Referenced files',
+    addFile: 'Add file',
+    filePlaceholder: 'Enter file path',
+    readFail: 'Read failed',
+    readPending: 'Not read',
+    placeholder: 'Enter prompt content, e.g. Always answer in English…',
     save: 'Save',
+    autoSaved: 'Auto-saved',
     saving: 'Saving…',
     savedToast: 'Saved',
     saveError: 'Failed to save',
+    conflict: 'Save conflict, retry',
     loading: 'Loading…',
     unavailable: 'Settings service unavailable',
     reset: 'Reset',
     unsaved: 'Unsaved',
+    emptyWorkspaces: 'No active workspaces',
+    inactive: 'Inactive',
+    remove: 'Remove',
+    sessionUnit: ' sessions',
   };
 
   var CHAR_LIMIT = 4000;
   var CHAR_WARN_AT = Math.floor(CHAR_LIMIT * 0.8);
-
-  function GearIcon() {
-    return React.createElement('svg', { viewBox: '0 0 24 24', width: 20, height: 20, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-      React.createElement('circle', { cx: 12, cy: 12, r: 3 }),
-      React.createElement('path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' }));
-  }
-
 
   function CheckIcon() {
     return React.createElement('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
@@ -994,39 +1020,100 @@ collect('identity', apply);
       React.createElement('line', { x1: 12, y1: 17, x2: 12.01, y2: 17 }));
   }
 
-  function GlobalPromptPage(props) {
+  function SwitchRow(props) {
     var t = props.t;
-    var scope = props.scope;
+    var enabled = props.enabled;
+    var onToggle = props.onToggle;
+    var label = props.label;
+    var hint = props.hint;
+    return React.createElement('div', { className: 'dsw-enable' },
+      React.createElement('button', { type: 'button', role: 'switch', 'aria-checked': enabled, className: 'dsw-switch' + (enabled ? ' on' : ''), onClick: onToggle, 'aria-label': label },
+        React.createElement('span', { className: 'dsw-switch-thumb' })),
+      React.createElement('div', { className: 'dsw-enable-text' },
+        React.createElement('div', { className: 'dsw-enable-label' }, label),
+        React.createElement('div', { className: 'dsw-enable-hint' }, hint)));
+  }
+
+  function Toast(props) {
+    var toast = props.toast;
+    var t = props.t;
+    return React.createElement('div', { className: 'dsw-toast ' + (toast.type === 'ok' ? 'ok' : 'err'), role: 'status' },
+      toast.type === 'ok' ? React.createElement(CheckIcon, null) : React.createElement(AlertIcon, null),
+      React.createElement('span', null, toast.text));
+  }
+
+  function TabBar(props) {
+    var t = props.t;
+    var tab = props.tab;
+    var onTab = props.onTab;
+    return React.createElement('div', { className: 'dsw-tabs', role: 'tablist' },
+      React.createElement('button', { type: 'button', role: 'tab', 'aria-selected': tab === 'global', className: 'dsw-tab' + (tab === 'global' ? ' active' : ''), onClick: function () { onTab('global'); } }, t('tabGlobal')),
+      React.createElement('button', { type: 'button', role: 'tab', 'aria-selected': tab === 'workspace', className: 'dsw-tab' + (tab === 'workspace' ? ' active' : ''), onClick: function () { onTab('workspace'); } }, t('tabWorkspace')));
+  }
+
+  function WorkspaceRow(props) {
+    var t = props.t;
+    var path = props.path;
     var ctx = props.ctx;
+    var wsScope = props.wsScope;
+    var fsStatusScope = props.fsStatusScope;
+    var active = props.active;
+    var sessionCount = props.sessionCount;
+    var onRemove = props.onRemove;
     var useState = React.useState;
     var useEffect = React.useEffect;
     var useRef = React.useRef;
 
-    var snap = scope.getSnapshot();
-    var initial = (snap && snap.value && typeof snap.value === 'object') ? snap.value : {};
-    var statusState = useState(snap ? snap.status : 'loading');
-    var enabledState = useState(initial.enabled === true);
-    var contentState = useState(typeof initial.content === 'string' ? initial.content : '');
-    var savingState = useState(false);
-    var toastState = useState(null);
-    var lastSavedRef = useRef({ enabled: initial.enabled === true, content: typeof initial.content === 'string' ? initial.content : '' });
+    var openState = useState(false);
+    var open = openState[0], setOpen = openState[1];
 
-    var status = statusState[0], setStatus = statusState[1];
+    var snap = wsScope.getSnapshot();
+    var v0 = (snap && snap.value && typeof snap.value === 'object') ? snap.value : {};
+    var ws0 = (v0.workspaces && typeof v0.workspaces === 'object') ? v0.workspaces : {};
+    var rec0 = ws0[path] || {};
+    var initEnabled = rec0.enabled === true;
+    var initContent = typeof rec0.content === 'string' ? rec0.content : '';
+
+    var enabledState = useState(initEnabled);
     var enabled = enabledState[0], setEnabled = enabledState[1];
+    var contentState = useState(initContent);
     var content = contentState[0], setContent = contentState[1];
+    var savingState = useState(false);
     var saving = savingState[0], setSaving = savingState[1];
+    var toastState = useState(null);
     var toast = toastState[0], setToast = toastState[1];
+    var lastSavedRef = useRef({ enabled: initEnabled, content: initContent });
+    var initFiles = Array.isArray(rec0.files) ? rec0.files : [];
+    var filesState = useState(initFiles);
+    var files = filesState[0], setFiles = filesState[1];
+    var wsSnap2 = fsStatusScope ? fsStatusScope.getSnapshot() : null;
+    var wsVal2 = (wsSnap2 && wsSnap2.value && typeof wsSnap2.value === 'object') ? wsSnap2.value : {};
+    var wsBy = (wsVal2.byScope && typeof wsVal2.byScope === 'object') ? wsVal2.byScope : {};
+    var wsFileStatus = Array.isArray(wsBy[path]) ? wsBy[path] : [];
+    function onWsFilesChange(newFiles) {
+      setFiles(newFiles);
+      var s = wsScope.getSnapshot();
+      var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+      var ws = (v.workspaces && typeof v.workspaces === 'object') ? { ...v.workspaces } : {};
+      var rec = (ws[path] && typeof ws[path] === 'object') ? { ...ws[path] } : { enabled: false, content: '', files: [] };
+      rec.files = newFiles;
+      ws[path] = rec;
+      Promise.resolve(wsScope.set('workspaces', ws)).catch(function () {});
+    }
 
     useEffect(function () {
-      return scope.subscribe(function () {
-        var s = scope.getSnapshot();
+      return wsScope.subscribe(function () {
+        var s = wsScope.getSnapshot();
         var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
-        setStatus(s ? s.status : 'loading');
-        setEnabled(v.enabled === true);
-        setContent(typeof v.content === 'string' ? v.content : '');
-        lastSavedRef.current = { enabled: v.enabled === true, content: typeof v.content === 'string' ? v.content : '' };
+        var ws = (v.workspaces && typeof v.workspaces === 'object') ? v.workspaces : {};
+        var r = ws[path] || {};
+        var e = r.enabled === true;
+        var c = typeof r.content === 'string' ? r.content : '';
+        lastSavedRef.current = { enabled: e, content: c };
+        setEnabled(e);
+        setContent(c);
       });
-    }, []);
+    }, [path]);
 
     useEffect(function () {
       if (!toast) return;
@@ -1036,16 +1123,51 @@ collect('identity', apply);
     function save() {
       if (saving) return;
       setSaving(true);
-      var next = { enabled: enabled, content: content };
-      Promise.resolve(scope.set('enabled', next.enabled)).then(function () {
-        return scope.set('content', next.content);
-      }).then(function () {
-        lastSavedRef.current = next;
-        setToast({ type: 'ok', text: t('savedToast') });
-      }).catch(function (e) {
-        setToast({ type: 'err', text: t('saveError') + ((e && e.message) ? ': ' + e.message : '') });
+      var s = wsScope.getSnapshot();
+      var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+      var ws = (v.workspaces && typeof v.workspaces === 'object') ? { ...v.workspaces } : {};
+      var cur = (ws[path] && typeof ws[path] === 'object') ? { ...ws[path] } : { enabled: false, content: '', files: [] };
+      var next = { enabled: cur.enabled, content: content, files: files };
+      ws[path] = next;
+      Promise.resolve(wsScope.set('workspaces', ws)).then(function () {
+        var s2 = wsScope.getSnapshot();
+        var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
+        var ws2 = (v2.workspaces && typeof v2.workspaces === 'object') ? v2.workspaces : {};
+        var cur2 = ws2[path];
+        var ok = cur2 && cur2.enabled === next.enabled && (typeof cur2.content === 'string' ? cur2.content : '') === next.content && Array.isArray(cur2.files) && JSON.stringify(cur2.files) === JSON.stringify(next.files);
+        if (ok) {
+          lastSavedRef.current = next;
+          setToast({ type: 'ok', text: t('savedToast') });
+        } else {
+          setToast({ type: 'err', text: t('saveError') + ': ' + t('conflict') });
+        }
+      }).catch(function () {
+        setToast({ type: 'err', text: t('saveError') });
       }).then(function () {
         setSaving(false);
+      });
+    }
+
+    function saveWsEnabled(next) {
+      var s = wsScope.getSnapshot();
+      var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+      var ws = (v.workspaces && typeof v.workspaces === 'object') ? { ...v.workspaces } : {};
+      var rec = (ws[path] && typeof ws[path] === 'object') ? { ...ws[path] } : { enabled: false, content: '', files: [] };
+      rec.enabled = next;
+      ws[path] = rec;
+      Promise.resolve(wsScope.set('workspaces', ws)).then(function () {
+        var s2 = wsScope.getSnapshot();
+        var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
+        var ws2 = (v2.workspaces && typeof v2.workspaces === 'object') ? v2.workspaces : {};
+        var cur = ws2[path];
+        if (cur && cur.enabled === next) {
+          setEnabled(next);
+          lastSavedRef.current = { enabled: next, content: lastSavedRef.current.content };
+        } else {
+          setToast({ type: 'err', text: t('saveError') + ': ' + t('conflict') });
+        }
+      }).catch(function () {
+        setToast({ type: 'err', text: t('saveError') });
       });
     }
 
@@ -1056,72 +1178,306 @@ collect('identity', apply);
       }
     }
 
-    if (status === 'loading') {
-      return React.createElement('div', { className: 'gpui-page gpui-busy' }, t('loading'));
-    }
-    if (status === 'unavailable') {
-      return React.createElement('div', { className: 'gpui-page gpui-busy gpui-busy-err' }, t('unavailable'));
-    }
-
-    var dirty = enabled !== lastSavedRef.current.enabled || content !== lastSavedRef.current.content;
     var count = content.length;
-    var countClass = 'gpui-count' + (count > CHAR_LIMIT ? ' gpui-count-error' : (count > CHAR_WARN_AT ? ' gpui-count-warn' : ''));
+    var countClass = 'dsw-count' + (count > CHAR_LIMIT ? ' dsw-count-error' : (count > CHAR_WARN_AT ? ' dsw-count-warn' : ''));
     var disabled = !enabled;
+    var dirty = enabled !== lastSavedRef.current.enabled || content !== lastSavedRef.current.content;
+    var rowTitle = active ? (path + ' · ' + String(sessionCount) + ' ' + t('sessionUnit')) : (path + ' · ' + t('inactive'));
+    var areaId = 'dsw-ws-' + path;
 
-    return React.createElement('div', { className: 'gpui-page' },
-      React.createElement('div', { className: 'gpui-card', tabIndex: -1, onKeyDown: onKeyDown },
-        React.createElement('header', { className: 'gpui-head' },
-          React.createElement('div', { className: 'gpui-title-row' },
-            React.createElement('div', { className: 'gpui-title-group' },
-              React.createElement(GearIcon, null),
-              React.createElement('h1', { className: 'gpui-title' }, t('title'))),
-            React.createElement('span', { className: 'gpui-badge ' + (enabled ? 'on' : 'off') }, enabled ? t('badgeOn') : t('badgeOff'))),
-          React.createElement('p', { className: 'gpui-desc' }, t('desc'))),
-
-        React.createElement('hr', { className: 'gpui-divider' }),
-
-        React.createElement('section', { className: 'gpui-enable' },
-          React.createElement('button', { type: 'button', role: 'switch', 'aria-checked': enabled, className: 'gpui-switch' + (enabled ? ' on' : ''), onClick: function () { setEnabled(!enabled); }, 'aria-label': t('enableLabel') },
-            React.createElement('span', { className: 'gpui-switch-thumb' })),
-          React.createElement('div', { className: 'gpui-enable-text' },
-            React.createElement('div', { className: 'gpui-enable-label' }, t('enableLabel')),
-            React.createElement('div', { className: 'gpui-enable-hint' }, t('enableHint')))),
-
-        React.createElement('hr', { className: 'gpui-divider' }),
-
-        React.createElement('section', { className: 'gpui-content' + (disabled ? ' gpui-disabled' : '') },
-          React.createElement('div', { className: 'gpui-label-row' },
-            React.createElement('label', { className: 'gpui-label', htmlFor: 'gpui-area' }, t('contentLabel')),
+    return React.createElement(primitives.DisclosureRow, {
+      icon: React.createElement(primitives.IconFolderOpenOutline16, { size: 16 }),
+      title: rowTitle,
+      open: open,
+      expandable: true,
+      onToggle: function () { setOpen(!open); },
+      expandOnRowClick: true,
+    },
+      React.createElement('div', { className: 'dsw-ws-body', onKeyDown: onKeyDown },
+        React.createElement(SwitchRow, {
+          t: t,
+          enabled: enabled,
+          onToggle: function () { saveWsEnabled(!enabled); },
+          label: t('enableLabel'),
+          hint: t('workspaceEnableHint'),
+        }),
+        React.createElement('div', { className: 'dsw-content' + (disabled ? ' dsw-disabled' : '') },
+          React.createElement('div', { className: 'dsw-label-row' },
+            React.createElement('label', { className: 'dsw-label', htmlFor: areaId }, t('contentLabel')),
             React.createElement('span', { className: countClass }, String(count) + ' ' + t('charUnit'))),
-          React.createElement('textarea', { id: 'gpui-area', className: 'gpui-area', value: content, disabled: disabled, spellCheck: false, placeholder: t('placeholder'), onChange: function (e) { setContent(e.target.value); } })),
+          React.createElement('textarea', { id: areaId, className: 'dsw-area', value: content, disabled: disabled, spellCheck: false, placeholder: t('placeholder'), onChange: function (e) { setContent(e.target.value); } })),
+          React.createElement(FileRefsPanel, { t: t, files: files, onFilesChange: onWsFilesChange, statuses: wsFileStatus }),
+        React.createElement('div', { className: 'dsw-actions' },
+          dirty ? React.createElement('span', { className: 'dsw-unsaved', role: 'status' }, t('unsaved')) : null,
+          React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', onClick: function () { onRemove(path); } }, t('remove')),
+          React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', onClick: function () { setEnabled(false); setContent(''); } }, t('reset')),
+          React.createElement(primitives.Button, { variant: 'primary', size: 'sm', disabled: saving || disabled || !dirty, onClick: save }, saving ? t('saving') : t('save'))),
+        toast ? React.createElement(Toast, { toast: toast, t: t }) : null));
+  }
 
-        React.createElement('hr', { className: 'gpui-divider' }),
+  function FileRefsPanel(props) {
+    var t = props.t;
+    var files = props.files;
+    var onFilesChange = props.onFilesChange;
+    var statuses = props.statuses;
+    var addInput = React.useState('');
+    var input = addInput[0], setInput = addInput[1];
+    function add() {
+      var val = input.trim();
+      if (!val || files.indexOf(val) !== -1) { setInput(''); return; }
+      onFilesChange(files.concat([val]));
+      setInput('');
+    }
+    function remove(idx) {
+      var next = files.slice();
+      next.splice(idx, 1);
+      onFilesChange(next);
+    }
+    return React.createElement('div', { className: 'dsw-files' },
+      React.createElement('div', { className: 'dsw-files-label' }, t('filesLabel')),
+      React.createElement('div', { className: 'dsw-files-list' }, (files || []).map(function (fp, idx) {
+        var st = null;
+        for (var i = 0; i < statuses.length; i++) { if (statuses[i].filePath === fp) { st = statuses[i]; break; } }
+        return React.createElement('div', { key: String(idx), className: 'dsw-file-item' },
+          React.createElement('span', { className: 'dsw-file-path' }, fp),
+          React.createElement('span', { className: 'dsw-file-status ' + (st ? (st.status === 'ok' ? 'ok' : 'fail') : 'pending') },
+            st ? (st.status === 'ok' ? (String(st.charCount) + ' ' + t('charUnit')) : (st.reason || t('readFail'))) : t('readPending')),
+          React.createElement('button', { type: 'button', className: 'dsw-file-remove', onClick: function () { remove(idx); }, 'aria-label': t('remove') }, '\u00d7'));
+      })),
+      React.createElement('div', { className: 'dsw-files-add' },
+        React.createElement('input', { className: 'dsw-file-input', value: input, placeholder: t('filePlaceholder'), onChange: function (e) { setInput(e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } } }),
+        React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', onClick: add }, t('addFile'))));
+  }
 
-        React.createElement('footer', { className: 'gpui-actions' },
-          dirty ? React.createElement('span', { className: 'gpui-unsaved', role: 'status' }, t('unsaved')) : null,
-          React.createElement('button', { type: 'button', className: 'gpui-btn gpui-reset', onClick: function () { setEnabled(false); setContent(''); } }, t('reset')),
-          React.createElement('button', { type: 'button', className: 'gpui-btn gpui-save', disabled: saving || disabled || !dirty, onClick: save },
-            saving ? React.createElement(React.Fragment, null,
-              React.createElement('span', { className: 'gpui-spinner', 'aria-hidden': true }),
-              t('saving')) : t('save')))),
+  function GlobalPromptPage(props) {
+    var t = props.t;
+    var scope = props.scope;
+    var wsScope = props.wsScope;
+    var activeScope = props.activeScope;
+    var fsStatusScope = props.fsStatusScope;
+    var ctx = props.ctx;
+    var useState = React.useState;
+    var useEffect = React.useEffect;
+    var useRef = React.useRef;
 
-      toast ? React.createElement('div', { className: 'gpui-toast ' + (toast.type === 'ok' ? 'ok' : 'err'), role: 'status' },
-        toast.type === 'ok' ? React.createElement(CheckIcon, null) : React.createElement(AlertIcon, null),
-        React.createElement('span', null, toast.text)) : null);
+    var tabState = useState('global');
+    var tab = tabState[0], setTab = tabState[1];
+
+    var gSnap = scope.getSnapshot();
+    var gInitial = (gSnap && gSnap.value && typeof gSnap.value === 'object') ? gSnap.value : {};
+    var gEnabledState = useState(gInitial.enabled === true);
+    var gEnabled = gEnabledState[0], setGEnabled = gEnabledState[1];
+    var gContentState = useState(typeof gInitial.content === 'string' ? gInitial.content : '');
+    var gContent = gContentState[0], setGContent = gContentState[1];
+    var gSavingState = useState(false);
+    var gSaving = gSavingState[0], setGSaving = gSavingState[1];
+    var gToastState = useState(null);
+    var gToast = gToastState[0], setGToast = gToastState[1];
+    var gLastSavedRef = useRef({ enabled: gInitial.enabled === true, content: typeof gInitial.content === 'string' ? gInitial.content : '' });
+    var gFilesState = useState(Array.isArray(gInitial.files) ? gInitial.files : []);
+    var gFiles = gFilesState[0], setGFiles = gFilesState[1];
+    var fileSnap = fsStatusScope ? fsStatusScope.getSnapshot() : null;
+    var fileVal = (fileSnap && fileSnap.value && typeof fileSnap.value === 'object') ? fileSnap.value : {};
+    var gFileStatus = (fileVal.byScope && Array.isArray(fileVal.byScope.global)) ? fileVal.byScope.global : [];
+    function onFilesChange(newFiles) { setGFiles(newFiles); Promise.resolve(scope.set('files', newFiles)).catch(function () {}); }
+    var gAutoTimerRef = useRef(null);
+    var autoSaveState = useState(null);
+    var gAutoSave = autoSaveState[0], setGAutoSave = autoSaveState[1];
+
+    function onChangeContent(e) {
+      var val = e.target.value;
+      setGContent(val);
+      if (gAutoTimerRef.current) { gAutoTimerRef.current(); gAutoTimerRef.current = null; }
+      setGAutoSave('saving');
+      gAutoTimerRef.current = ctx.timeout(function () {
+        gAutoTimerRef.current = null;
+        Promise.resolve(scope.set('content', val)).then(function () {
+          var s = scope.getSnapshot();
+          var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+          var saved = typeof v.content === 'string' && v.content === val;
+          setGAutoSave(saved ? 'saved' : 'saving');
+          gLastSavedRef.current = { enabled: gEnabled, content: val };
+        }).catch(function () { setGAutoSave('saving'); });
+      }, 500);
+    }
+
+    useEffect(function () {
+      return function () {
+        if (gAutoTimerRef.current) { gAutoTimerRef.current(); gAutoTimerRef.current = null; }
+      };
+    }, []);
+    var gStatus = gSnap ? gSnap.status : 'loading';
+
+    useEffect(function () {
+      return scope.subscribe(function () {
+        var s = scope.getSnapshot();
+        var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+        setGEnabled(v.enabled === true);
+        setGContent(typeof v.content === 'string' ? v.content : '');
+        gLastSavedRef.current = { enabled: v.enabled === true, content: typeof v.content === 'string' ? v.content : '' };
+      });
+    }, []);
+
+    useEffect(function () {
+      if (!gToast) return;
+      return ctx.timeout(function () { setGToast(null); }, 2000);
+    }, [gToast]);
+
+    function saveGlobal() {
+      if (gSaving) return;
+      setGSaving(true);
+      var next = { enabled: gEnabled, content: gContent };
+      Promise.resolve(scope.set('enabled', next.enabled)).then(function () {
+        return scope.set('content', next.content);
+      }).then(function () {
+        gLastSavedRef.current = next;
+        setGToast({ type: 'ok', text: t('savedToast') });
+      }).catch(function (e) {
+        setGToast({ type: 'err', text: t('saveError') + ((e && e.message) ? ': ' + e.message : '') });
+      }).then(function () {
+        setGSaving(false);
+      });
+    }
+
+    function saveGlobalEnabled(next) {
+      if (gSaving) return;
+      setGSaving(true);
+      Promise.resolve(scope.set('enabled', next)).then(function () {
+        var s = scope.getSnapshot();
+        var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+        var ok = v.enabled === next;
+        if (ok) {
+          gLastSavedRef.current = { enabled: next, content: gLastSavedRef.current.content };
+          setGEnabled(next);
+          setGToast({ type: 'ok', text: t('savedToast') });
+        } else {
+          setGToast({ type: 'err', text: t('saveError') + ': ' + t('conflict') });
+        }
+      }).catch(function (e) {
+        setGToast({ type: 'err', text: t('saveError') + ((e && e.message) ? ': ' + e.message : '') });
+      }).then(function () {
+        setGSaving(false);
+      });
+    }
+
+    function onGlobalKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        saveGlobal();
+      }
+    }
+
+    if (gStatus === 'loading') {
+      return React.createElement('div', { className: 'dsw-page dsw-busy' }, t('loading'));
+    }
+    if (gStatus === 'unavailable') {
+      return React.createElement('div', { className: 'dsw-page dsw-busy dsw-busy-err' }, t('unavailable'));
+    }
+
+    var gCount = gContent.length;
+    var gCountClass = 'dsw-count' + (gCount > CHAR_LIMIT ? ' dsw-count-error' : (gCount > CHAR_WARN_AT ? ' dsw-count-warn' : ''));
+    var gDisabled = !gEnabled;
+    var gDirty = gEnabled !== gLastSavedRef.current.enabled || gContent !== gLastSavedRef.current.content;
+
+    var wsSnap = wsScope.getSnapshot();
+    var wsValue = (wsSnap && wsSnap.value && typeof wsSnap.value === 'object') ? wsSnap.value : {};
+    var workspaces = (wsValue.workspaces && typeof wsValue.workspaces === 'object') ? wsValue.workspaces : {};
+    // 列表主源：workspace-registry-active.active（活跃投影）；workspace-prompt.workspaces 仅用于读写配置
+
+    var actSnap = activeScope.getSnapshot();
+    var actValue = (actSnap && actSnap.value && typeof actSnap.value === 'object') ? actSnap.value : {};
+    var activeList = Array.isArray(actValue.active) ? actValue.active : [];
+    var activeMap = {};
+    for (var ai = 0; ai < activeList.length; ai++) { activeMap[activeList[ai].path] = activeList[ai].sessionCount; }
+
+    function removeWorkspace(pathKey) {
+      var remS = wsScope.getSnapshot();
+      var remV = (remS && remS.value && typeof remS.value === 'object') ? remS.value : {};
+      var remWs = (remV.workspaces && typeof remV.workspaces === 'object') ? { ...remV.workspaces } : {};
+      var remRd = Array.isArray(remV.removed) ? remV.removed.slice() : [];
+      delete remWs[pathKey];
+      if (remRd.indexOf(pathKey) === -1) remRd.push(pathKey);
+      // P2-1：先写 removed 再写 workspaces——即使 workspaces 写失败，removed 已记录也会阻止 sync 补回，移除不失效
+      Promise.resolve(wsScope.set('removed', remRd)).then(function () {
+        return wsScope.set('workspaces', remWs);
+      }).then(function () {
+        // 读回校验：removed 已记录且 workspaces 已删除，二者一致才算成功
+        var s2 = wsScope.getSnapshot();
+        var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
+        var ws2 = (v2.workspaces && typeof v2.workspaces === 'object') ? v2.workspaces : {};
+        var rd2 = Array.isArray(v2.removed) ? v2.removed : [];
+        var ok = ws2[pathKey] === undefined && rd2.indexOf(pathKey) !== -1;
+        if (!ok) console.warn('[dsh-global-prompt] removeWorkspace verification failed for ' + pathKey);
+      }).catch(function (e) {
+        console.warn('[dsh-global-prompt] removeWorkspace failed for ' + pathKey + ': ' + String(e && e.message ? e.message : e));
+      });
+    }
+
+    return React.createElement('div', { className: 'dsw-page' },
+      React.createElement('div', { className: 'dsw-card', tabIndex: -1 },
+        React.createElement('header', { className: 'dsw-head' },
+          React.createElement('div', { className: 'dsw-title-row' },
+            React.createElement('div', { className: 'dsw-title-group' },
+              React.createElement(primitives.IconGlobeOutline14, { size: 18 }),
+              React.createElement('h1', { className: 'dsw-title' }, t('title'))),
+            React.createElement(primitives.Pill, { active: gEnabled, className: 'dsw-badge' }, gEnabled ? t('badgeOn') : t('badgeOff'))),
+          React.createElement('p', { className: 'dsw-desc' }, t('desc'))),
+
+        React.createElement('div', { className: 'dsw-scope-note' }, t('scopeOrder')),
+
+        React.createElement(TabBar, { t: t, tab: tab, onTab: setTab }),
+
+        React.createElement('hr', { className: 'dsw-divider' }),
+
+        tab === 'global'
+          ? React.createElement('div', { onKeyDown: onGlobalKeyDown },
+              React.createElement(SwitchRow, {
+                t: t,
+                enabled: gEnabled,
+                onToggle: function () { saveGlobalEnabled(!gEnabled); },
+                label: t('enableLabel'),
+                hint: t('enableHint'),
+              }),
+              React.createElement('hr', { className: 'dsw-divider' }),
+              React.createElement('div', { className: 'dsw-content' + (gDisabled ? ' dsw-disabled' : '') },
+                React.createElement('div', { className: 'dsw-label-row' },
+                  React.createElement('label', { className: 'dsw-label', htmlFor: 'dsw-global-area' }, t('contentLabel')),
+                  React.createElement('span', { className: gCountClass }, String(gCount) + ' ' + t('charUnit'))),
+                React.createElement('textarea', { id: 'dsw-global-area', className: 'dsw-area', value: gContent, disabled: gDisabled, spellCheck: false, placeholder: t('placeholder'), onChange: onChangeContent })),
+              React.createElement(FileRefsPanel, { t: t, files: gFiles, onFilesChange: onFilesChange, statuses: gFileStatus }),
+              React.createElement('hr', { className: 'dsw-divider' }),
+              React.createElement('div', { className: 'dsw-actions' },
+                React.createElement('span', { className: 'dsw-autosave', role: 'status' }, gAutoSave === 'saved' ? t('autoSaved') : (gAutoSave === 'saving' ? t('saving') : '')),
+                React.createElement(primitives.Button, { variant: 'ghost', onClick: function () {
+                  if (gAutoTimerRef.current) { gAutoTimerRef.current(); gAutoTimerRef.current = null; }
+                  setGEnabled(false); setGContent('');
+                  Promise.resolve(scope.set('enabled', false)).then(function () {
+                    return scope.set('content', '');
+                  }).then(function () {
+                    gLastSavedRef.current = { enabled: false, content: '' };
+                    setGAutoSave('saved');
+                  }).catch(function () {});
+                } }, t('reset'))),
+              gToast ? React.createElement(Toast, { toast: gToast, t: t }) : null)
+          : React.createElement('div', { className: 'dsw-workspace' },
+              activeList.length === 0
+                ? React.createElement('div', { className: 'dsw-empty' }, t('emptyWorkspaces'))
+                : React.createElement('div', { className: 'dsw-ws-list' }, activeList.map(function (item) {
+                    return React.createElement(WorkspaceRow, { key: item.path, t: t, path: item.path, ctx: ctx, wsScope: wsScope, fsStatusScope: fsStatusScope, active: true, sessionCount: item.sessionCount, onRemove: removeWorkspace });
+                  })))));
   }
 
   function injectCss() {
     if (typeof document === 'undefined') return;
-    if (document.getElementById('gprd-global-prompt-css')) return;
+    if (document.getElementById('dsh-global-prompt-css')) return;
     var style = document.createElement('style');
-    style.id = 'gprd-global-prompt-css';
+    style.id = 'dsh-global-prompt-css';
     style.setAttribute('data-plugin', 'dsh-global-prompt');
     style.textContent = CSS;
     document.head.appendChild(style);
   }
 
   function apply(ctx, cfg) {
-    // Config 分键（client.identityCharLimit），缺省兜底默认值
     var limit = (cfg && typeof cfg.identityCharLimit === 'number') ? cfg.identityCharLimit : 4000;
     CHAR_LIMIT = limit;
     CHAR_WARN_AT = Math.floor(limit * 0.8);
@@ -1138,6 +1494,12 @@ collect('identity', apply);
     }
 
     var scope = settingsScope.bind({ namespace: 'global-prompt' });
+    var wsScope = null;
+    try { wsScope = settingsScope.bind({ namespace: 'workspace-prompt' }); } catch (e) { wsScope = null; }
+    var fsStatusScope = null;
+    try { fsStatusScope = settingsScope.bind({ namespace: 'prompt-file-status' }); } catch (e) { fsStatusScope = null; }
+    var activeScope = null;
+    try { activeScope = settingsScope.bind({ namespace: 'workspace-registry-active' }); } catch (e) { activeScope = null; }
     slots.inject('settings.section', function () {
       return slots.register({
         name: 'settings.section',
@@ -1146,68 +1508,78 @@ collect('identity', apply);
         label: function () { return t('nav'); },
         locale: NS,
       }, function () {
-        return React.createElement(GlobalPromptPage, { t: t, scope: scope, ctx: ctx });
+        return React.createElement(GlobalPromptPage, { t: t, scope: scope, wsScope: wsScope, activeScope: activeScope, fsStatusScope: fsStatusScope, ctx: ctx });
       });
     });
   }
 
   var CSS = [
-    '.gpui-page{--gpui-bg-page:var(--dsw-alias-bg-base,#F6F7F9);--gpui-bg-card:var(--dsw-alias-bg-layer-1,#FFFFFF);--gpui-border-card:var(--dsw-alias-border-l1,#E5E6EB);--gpui-border-divider:var(--dsw-alias-border-l1,#F0F1F3);--gpui-border-input:var(--dsw-alias-border-l2,#DEE0E3);--gpui-text-title:var(--dsw-alias-label-primary,#1F2329);--gpui-text-body:var(--dsw-alias-label-secondary,#646A73);--gpui-text-sub:var(--dsw-alias-label-secondary,#8F959E);--gpui-primary:#3370FF;--gpui-primary-hover:#2860E1;--gpui-primary-ring:rgba(51,112,255,.15);--gpui-success-bg:#E8F7EE;--gpui-success-text:#23A05C;--gpui-muted-bg:#F2F3F5;--gpui-muted-text:#86909C;--gpui-warn:#F59E0B;--gpui-error:#F53F3F;--gpui-info-bg:#F0F5FF;--gpui-info-text:#4E5969;--gpui-shadow:0 2px 8px rgba(0,0,0,.04);--gpui-shadow-toast:0 4px 16px rgba(0,0,0,.12);--gpui-disabled-opacity:.45;--gpui-font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--gpui-bg-page);min-height:100%;padding:32px 24px;box-sizing:border-box;font-family:var(--gpui-font);color:var(--gpui-text-title);font-size:14px;line-height:1.6;transition:background .2s ease,color .2s ease}',
-    '.gpui-card{max-width:720px;margin:0 auto;background:var(--gpui-bg-card);border:1px solid var(--gpui-border-card);border-radius:12px;box-shadow:var(--gpui-shadow);padding:24px 28px;display:flex;flex-direction:column;box-sizing:border-box;transition:background .2s ease,border-color .2s ease,box-shadow .2s ease}',
-    '.gpui-head{display:flex;flex-direction:column}',
-    '.gpui-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
-    '.gpui-title-group{display:flex;align-items:center;gap:8px;min-width:0}',
-    '.gpui-gear{flex:none;color:var(--gpui-text-title)}',
-    '.gpui-title{margin:0;font-size:20px;font-weight:600;color:var(--gpui-text-title);line-height:1.3;transition:color .2s ease}',
-    '.gpui-badge{flex:none;height:24px;line-height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap;transition:background .2s ease,color .2s ease}',
-    '.gpui-badge.on{background:var(--gpui-success-bg);color:var(--gpui-success-text)}',
-    '.gpui-badge.on::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gpui-success-text);margin-right:6px;vertical-align:1px}',
-    '.gpui-badge.off{background:var(--gpui-muted-bg);color:var(--gpui-muted-text)}',
-    '.gpui-desc{margin:8px 0 0;font-size:14px;line-height:1.6;color:var(--gpui-text-body);transition:color .2s ease}',
-    '.gpui-divider{height:1px;border:none;background:var(--gpui-border-divider);opacity:.55;margin:24px 0;flex:none;transition:background .2s ease}',
-    '.gpui-enable{display:flex;align-items:flex-start;gap:12px}',
-    '.gpui-switch{position:relative;flex:none;width:40px;height:22px;margin-top:2px;padding:0;border:none;border-radius:999px;background:var(--gpui-border-input);cursor:pointer;transition:background .2s ease;box-sizing:border-box}',
-    '.gpui-switch.on{background:var(--gpui-primary)}',
-    '.gpui-switch-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);transition:transform .2s ease}',
-    '.gpui-switch.on .gpui-switch-thumb{transform:translateX(18px)}',
-    '.gpui-enable-text{display:flex;flex-direction:column;gap:2px;min-width:0}',
-    '.gpui-enable-label{font-size:14px;font-weight:500;color:var(--gpui-text-title);transition:color .2s ease}',
-    '.gpui-enable-hint{font-size:12px;color:var(--gpui-text-sub);transition:color .2s ease}',
-    '.gpui-content{display:flex;flex-direction:column;gap:10px;transition:opacity .2s ease}',
-    '.gpui-content.gpui-disabled{opacity:var(--gpui-disabled-opacity);pointer-events:none}',
-    '.gpui-label-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}',
-    '.gpui-label{font-size:14px;font-weight:500;color:var(--gpui-text-title);transition:color .2s ease}',
-    '.gpui-count{font-size:12px;color:var(--gpui-text-sub);font-variant-numeric:tabular-nums;transition:color .2s ease}',
-    '.gpui-count-warn{color:var(--gpui-warn)}',
-    '.gpui-count-error{color:var(--gpui-error)}',
-    '.gpui-area{width:100%;min-height:160px;padding:12px;box-sizing:border-box;border:1px solid var(--gpui-border-input);border-radius:8px;background:var(--gpui-bg-card);font-family:inherit;font-size:14px;line-height:1.7;color:var(--gpui-text-title);resize:vertical;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease,color .2s ease}',
-    '.gpui-area::placeholder{color:var(--gpui-text-sub)}',
-    '.gpui-area:focus{outline:none;border-color:var(--gpui-primary);box-shadow:0 0 0 3px var(--gpui-primary-ring)}',
-    '.gpui-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px}',
-    '.gpui-unsaved{font-size:12px;color:var(--gpui-warn);transition:color .2s ease}',
-    '.gpui-btn{height:36px;padding:0 20px;border-radius:8px;border:1px solid transparent;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:background .2s ease,color .2s ease,border-color .2s ease,transform .1s ease}',
-    '.gpui-reset{background:transparent;color:var(--gpui-text-body);border-color:var(--gpui-border-input)}',
-    '.gpui-reset:hover{background:var(--gpui-muted-bg);color:var(--gpui-text-title)}',
-    '.gpui-reset:active{transform:translateY(1px)}',
-    '.gpui-save{background:var(--gpui-primary);color:#fff}',
-    '.gpui-save:hover:not(:disabled){background:var(--gpui-primary-hover)}',
-    '.gpui-save:active:not(:disabled){transform:translateY(1px)}',
-    '.gpui-save:disabled{cursor:not-allowed;opacity:var(--gpui-disabled-opacity)}',
-    '.gpui-spinner{display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:-2px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:gpui-spin .6s linear infinite}',
-    '.gpui-btn:focus-visible,.gpui-switch:focus-visible{outline:2px solid var(--gpui-primary);outline-offset:2px}',
-    '.gpui-toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:8px;padding:10px 20px;border-radius:8px;background:var(--gpui-bg-card);border:1px solid var(--gpui-border-card);box-shadow:var(--gpui-shadow-toast);font-size:14px;font-family:var(--gpui-font);animation:gpui-toast-in .2s ease;transition:background .2s ease,border-color .2s ease}',
-    '.gpui-toast.ok{color:var(--gpui-success-text)}',
-    '.gpui-toast.err{color:var(--gpui-error)}',
-    '.gpui-busy{padding:48px 24px;text-align:center;color:var(--gpui-text-body)}',
-    '.gpui-busy-err{color:var(--gpui-error)}',
-    '@keyframes gpui-spin{to{transform:rotate(360deg)}}',
-    '@keyframes gpui-toast-in{from{opacity:0;transform:translate(-50%,-6px)}to{opacity:1;transform:translate(-50%,0)}}',
-    '@media (prefers-color-scheme:dark){.gpui-page{--gpui-success-bg:rgba(35,160,92,.18);--gpui-success-text:#3CC97A;--gpui-muted-bg:#2A2E34;--gpui-muted-text:#A9AEB8;--gpui-info-bg:rgba(51,112,255,.16);--gpui-info-text:#A8C2FF;--gpui-shadow:0 2px 8px rgba(0,0,0,.3);--gpui-shadow-toast:0 4px 16px rgba(0,0,0,.45)}}',
+    '.dsw-page{--dsw-bg-page:var(--dsw-alias-bg-base);--dsw-bg-card:var(--dsw-alias-bg-layer-1);--dsw-border-l1:var(--dsw-alias-border-l1);--dsw-border-l2:var(--dsw-alias-border-l2);--dsw-text-title:var(--dsw-alias-label-primary);--dsw-text-body:var(--dsw-alias-label-secondary);--dsw-text-sub:var(--dsw-alias-label-tertiary);--dsw-success-text:var(--dsw-alias-state-success-primary);--dsw-warn:var(--dsw-alias-state-warn-label);--dsw-error:var(--dsw-alias-state-error-primary);background:var(--dsw-bg-page);min-height:100%;padding:32px 24px;box-sizing:border-box;font-family:var(--dsw-font-family);color:var(--dsw-text-title);font-size:14px;line-height:1.6;transition:background .2s ease,color .2s ease}',
+    '.dsw-card{max-width:720px;margin:0 auto;background:var(--dsw-bg-card);border:1px solid var(--dsw-border-l1);border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.04);padding:24px 28px;display:flex;flex-direction:column;box-sizing:border-box;transition:background .2s ease,border-color .2s ease,box-shadow .2s ease}',
+    '.dsw-head{display:flex;flex-direction:column}',
+    '.dsw-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
+    '.dsw-title-group{display:flex;align-items:center;gap:8px;min-width:0}',
+    '.dsw-title{margin:0;font-size:20px;font-weight:600;color:var(--dsw-text-title);line-height:1.3;transition:color .2s ease}',
+    '.dsw-badge{height:24px;line-height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}',
+    '.dsw-desc{margin:8px 0 0;font-size:14px;line-height:1.6;color:var(--dsw-text-body);transition:color .2s ease}',
+    '.dsw-scope-note{margin-top:12px;font-size:12px;line-height:1.6;color:var(--dsw-text-sub);background:var(--dsw-alias-interactive-bg-hover);border-radius:8px;padding:8px 12px;transition:color .2s ease,background .2s ease}',
+    '.dsw-tabs{display:flex;gap:8px;margin-top:16px;padding-bottom:0;border-bottom:1px solid var(--dsw-border-l2)}',
+    '.dsw-tab{height:32px;padding:0 14px;border:none;border-radius:8px 8px 0 0;background:transparent;color:var(--dsw-text-sub);font-family:var(--dsw-font-family);font-size:14px;font-weight:500;cursor:pointer;transition:background .2s ease,color .2s ease;border-bottom:2px solid transparent}',
+    '.dsw-tab.active{color:var(--dsw-text-title);border-bottom-color:var(--dsw-alias-state-business-primary)}',
+    '.dsw-divider{height:1px;border:none;background:var(--dsw-border-l2);opacity:.55;margin:20px 0;flex:none;transition:background .2s ease}',
+    '.dsw-enable{display:flex;align-items:flex-start;gap:12px}',
+    '.dsw-switch{position:relative;flex:none;width:40px;height:22px;margin-top:2px;padding:0;border:none;border-radius:999px;background:var(--dsw-alias-bg-layer-2);cursor:pointer;transition:background .2s ease;box-sizing:border-box}',
+    '.dsw-switch.on{background:var(--dsw-alias-state-business-primary)}',
+    '.dsw-switch-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);transition:transform .2s ease}',
+    '.dsw-switch.on .dsw-switch-thumb{transform:translateX(18px)}',
+    '.dsw-enable-text{display:flex;flex-direction:column;gap:2px;min-width:0}',
+    '.dsw-enable-label{font-size:14px;font-weight:500;color:var(--dsw-text-title);transition:color .2s ease}',
+    '.dsw-enable-hint{font-size:12px;color:var(--dsw-text-sub);transition:color .2s ease}',
+    '.dsw-content{display:flex;flex-direction:column;gap:10px;transition:opacity .2s ease}',
+    '.dsw-content.dsw-disabled{opacity:.45;pointer-events:none}',
+    '.dsw-label-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}',
+    '.dsw-label{font-size:14px;font-weight:500;color:var(--dsw-text-title);transition:color .2s ease}',
+    '.dsw-count{font-size:12px;color:var(--dsw-text-sub);font-variant-numeric:tabular-nums;transition:color .2s ease}',
+    '.dsw-count-warn{color:var(--dsw-warn)}',
+    '.dsw-count-error{color:var(--dsw-error)}',
+    '.dsw-area{width:100%;min-height:140px;padding:12px;box-sizing:border-box;border:1px solid var(--dsw-border-l2);border-radius:8px;background:var(--dsw-bg-card);font-family:var(--dsw-font-family);font-size:14px;line-height:1.7;color:var(--dsw-text-title);resize:vertical;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease,color .2s ease}',
+    '.dsw-area::placeholder{color:var(--dsw-text-sub)}',
+    '.dsw-area:focus{outline:none;border-color:var(--dsw-alias-state-business-primary)}',
+    '.dsw-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px}',
+    '.dsw-unsaved{font-size:12px;color:var(--dsw-warn);transition:color .2s ease}',
+    '.dsw-workspace{display:flex;flex-direction:column}',
+    '.dsw-ws-list{display:flex;flex-direction:column;gap:8px}',
+    '.dsw-ws-body{display:flex;flex-direction:column;gap:14px;padding:4px 0 4px 2px}',
+    '.dsw-empty{padding:48px 24px;text-align:center;color:var(--dsw-text-sub)}',
+    '.dsw-files{display:flex;flex-direction:column;gap:8px;margin-top:14px;padding:12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;font-family:var(--dsw-font-family)}',
+    '.dsw-files-label{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary)}',
+    '.dsw-files-list{display:flex;flex-direction:column;gap:4px}',
+    '.dsw-file-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);transition:background .2s ease}',
+    '.dsw-file-item:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+    '.dsw-file-path{flex:1;min-width:0;font-size:13px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.dsw-file-status{flex:none;font-size:12px;font-weight:500;line-height:20px;height:20px;padding:0 8px;border-radius:999px;white-space:nowrap}',
+    '.dsw-file-status.ok{background:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-bg-layer-1)}',
+    '.dsw-file-status.fail{background:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-bg-layer-1)}',
+    '.dsw-file-status.pending{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
+    '.dsw-file-remove{flex:none;border:none;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:16px;line-height:1;padding:0 4px;border-radius:4px;transition:background .15s ease,color .15s ease}',
+    '.dsw-file-remove:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-error-primary)}',
+    '.dsw-files-add{display:flex;gap:8px}',
+    '.dsw-file-input{flex:1;min-width:0;height:30px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:13px}',
+    '.dsw-file-input::placeholder{color:var(--dsw-alias-label-secondary)}',
+    '.dsw-file-input:focus{outline:none;border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 3px var(--dsw-alias-state-business-primary)}',
+    '.dsw-toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:8px;padding:10px 20px;border-radius:8px;background:var(--dsw-bg-card);border:1px solid var(--dsw-border-l1);box-shadow:0 4px 16px rgba(0,0,0,.12);font-size:14px;font-family:var(--dsw-font-family);animation:dsw-toast-in .2s ease;transition:background .2s ease,border-color .2s ease}',
+    '.dsw-toast.ok{color:var(--dsw-success-text)}',
+    '.dsw-toast.err{color:var(--dsw-error)}',
+    '.dsw-busy{padding:48px 24px;text-align:center;color:var(--dsw-text-body)}',
+    '.dsw-busy-err{color:var(--dsw-error)}',
+    '@keyframes dsw-spin{to{transform:rotate(360deg)}}',
+    '@keyframes dsw-toast-in{from{opacity:0;transform:translate(-50%,-6px)}to{opacity:1;transform:translate(-50%,0)}}',
+    
   ].join('\n');
 
   var name = 'dsh-global-prompt';
   var inject = ['slots', 'locale', 'settingsScope', 'timer'];
-collect('global-prompt', apply);
+  collect('global-prompt', apply);
   exports.name = name;
     })();
 
@@ -1451,9 +1823,9 @@ collect('global-prompt', apply);
       '.wr-item-btn:hover:not(:disabled){background:#2860E1}',
       '.wr-item-btn:disabled{opacity:.45;cursor:not-allowed}',
       '.wr-mask{position:fixed;inset:0;z-index:20000;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}',
-      '.wr-card{width:420px;max-width:100%;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l1,#E5E6EB);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.18);padding:32px 28px;box-sizing:border-box;text-align:center;color:var(--dsw-alias-label-primary,#1F2329)}',
+      '.wr-card{width:420px;max-width:100%;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.18);padding:32px 28px;box-sizing:border-box;text-align:center;color:var(--dsw-alias-label-primary,#1F2329)}',
       '.wr-title{font-size:18px;font-weight:600;margin:0 0 20px;line-height:1.4}',
-      '.wr-progress{height:8px;border-radius:4px;background:var(--dsw-alias-border-l2,#DEE0E3);overflow:hidden;margin-bottom:12px}',
+      '.wr-progress{height:8px;border-radius:4px;background:var(--dsw-alias-border-l2);overflow:hidden;margin-bottom:12px}',
       '.wr-progress-fill{height:100%;border-radius:4px;background:#3370FF;transition:width .4s ease}',
       '.wr-phase{font-size:13px;color:var(--dsw-alias-label-secondary,#646A73)}',
       '.wr-timeout{margin-top:16px;display:flex;flex-direction:column;gap:12px;align-items:center;font-size:13px;color:#F53F3F}',
