@@ -9,7 +9,7 @@ DeepSeek Harness 插件整合包。将六个此前相互独立的本地插件—
 - **会话身份** — 每会话人设提示词注入该会话系统提示词（独立段 `session-identity`，order 55，每次组装按 agent 求值），支持默认身份与每会话覆盖。UI：身份浮层（启用开关、4000 字符软上限、保存/重置、编辑默认身份、继承默认身份）及双入口状态按钮：`conversation.session.header.actions`（id `session-identity`，order 40）与 `conversation.input.left`（id `session-identity-input`，order 40）。
 - **全局提示词** — 设置页（`settings.section`，id `global-prompt`，order 30）配置一段注入所有会话系统提示词的文本（段 `global-prompt`，order 50）。连续 `{` 被空格化（`/\{+/g`），避免与提示词变量冲突。
 - **会话自动上线** — 开启每会话开关的会话在 GUI 重启后自动 resume（`ctx.agents.resume`，携带 `agentDefaultModel` 默认模型）；开关从关→开时立即生效。过滤链：开关开启 + 仅顶层（非 subagent origin、`delegationDepth <= 0`、无 `parentSession`）+ 非空白（`seedLength !== 0`）。并发受限（`CONCURRENCY = 3`）、单项失败隔离、in-flight 集合防重复 resume。
-- **Web 重启服务** — 通用设置中的「重启服务」条目（`settings.general.item`，id `web-restart`，order 90），**无 UAC 弹窗**（spawn 继承服务器进程 token，重启脚本的提权分支不会触达），带全屏进度覆盖层（探测驱动进度、刷新前补满动画、90s 超时兜底 + 手动刷新）。路由：`GET /api/restart`（健康探测，恒 200）与 `POST /api/restart`（触发，进行中返回 409，202 后 500ms 缓冲再 spawn）。
+- **Web 重启服务** — 通用设置中的「重启服务」条目（`settings.general.item`，id `web-restart`，order 90），**无 UAC 弹窗**（spawn 继承服务器进程 token，重启脚本的提权分支不会触达），带全屏进度覆盖层（探测驱动进度、刷新前补满动画、90s 超时兜底 + 手动刷新）。路由：`GET /api/restart`（健康探测，恒 200）与 `POST /api/restart`（触发，进行中返回 409，202 后 500ms 缓冲再 spawn）。恢复以**先中断后恢复**判定：覆盖层仅在观测到探测连续失败 `client.restartFailThreshold` 次、随后再次返回 200 时才刷新；若探测全程可达则判定"未检测到重启"（`noRestart`），直至超时并提示手动刷新。
 - **Session log 按钮平移** — 在 `conversation.session.header.utilities` 遮蔽官方下载按钮（同 id `session-log-download`，priority −1，cell shadowing），并在 `conversation.session.header.actions` 注册复刻按钮（id `session-log-download-moved`，order 41），复用官方 `sessionLogDownload` controller（`ctx.get('sessionLogDownload')`），下载行为与官方完全一致。
 - **会话间对等消息** — host 平面注册 `send_to_session` / `list_sessions` 工具（按会话 id 或工作区路径寻址、唤醒投递）+ 「复制会话 ID」按钮双入口（`conversation.session.header.actions` id `copy-session-id` order 30；`conversation.input.left` id `copy-session-id-input` order 30）。发送前消息内容经 `toPlainText` 转为纯文本，接收方看到整洁文本而非原始 markdown。
 
@@ -67,6 +67,7 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
       restartTimeoutMs: 90000
       restartPollMs: 1000
       restartFillMs: 600
+      restartFailThreshold: 2
       copyFeedbackMs: 1600
 ```
 
@@ -82,6 +83,7 @@ Settings 命名空间（schema 校验、`applies: live`、持久化于 `settings
 | `client.restartTimeoutMs` | 90000 | 重启覆盖层超时（显示手动刷新提示）。 |
 | `client.restartPollMs` | 1000 | 重启健康探测轮询间隔。 |
 | `client.restartFillMs` | 600 | 探测恢复后的进度补满动画时长。 |
+| `client.restartFailThreshold` | 2 | 判定"观测到中断"所需的连续失败探测次数。 |
 | `client.copyFeedbackMs` | 1600 | 复制反馈对勾显示时长。 |
 
 ## 部署
@@ -152,6 +154,7 @@ dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
 - `toPlainText` 宽松斜体匹配可能误删非格式位置的成对 `*`（如 `a * b * c`）；对 agent 生成消息可接受，边界收紧为可选优化。
 - 聚合 `inject` 并集会等待所列全部服务；某 profile 缺一服务会拖慢整包 apply（web profile 当前齐备）。
 - `ctx.get('agentDefaultModel')` 在 apply 时非惰性解析；gateway 先于本包挂载该服务，web profile 恒有值。
+- **重启探测窗口** — 仅在健康探测连续失败 `restartFailThreshold × restartPollMs`（默认 2 × 1000 ms = 2 s）后恢复时判定为重启。若 relaunch 在该窗口内完成，覆盖层可能误报"未检测到重启"（`noRestart`）；调低 `restartFailThreshold` 到 1 虽更灵敏，也会让单次瞬时失败被误判为重启中断。
 
 ## 恢复方法
 

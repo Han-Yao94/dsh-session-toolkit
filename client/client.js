@@ -15,6 +15,7 @@ window.__ModuleLoader__.load({
       restartPollMs: z.number().default(1000),
       restartFillMs: z.number().default(600),
       copyFeedbackMs: z.number().default(1600),
+      restartFailThreshold: z.number().default(2),
     });
 
     // ===== 模块 1：会话身份（identity，含自动上线开关行、header/input 双入口）=====
@@ -467,6 +468,8 @@ window.__ModuleLoader__.load({
     var toast = toastState[0], setToast = toastState[1];
 
     var lastSavedRef = React.useRef({ enabled: eff.enabled, text: eff.text.trim() });
+    // 开关即时保存的防重入 guard：避免快速连点触发并发写（读-改-写窗口）
+    var persistBusyRef = React.useRef(false);
 
     React.useEffect(function () {
       return scope.subscribe(function () {
@@ -567,6 +570,63 @@ window.__ModuleLoader__.load({
       });
     }
 
+    // 开关即时保存：写完整快照（enabled + 当前 text），与默认解析值一致则删记录（保持"继承默认"语义）
+    function persistIdentity(nextEnabled) {
+      if (persistBusyRef.current) return;
+      persistBusyRef.current = true;
+      var nextText = text.trim();
+      var s = scope.getSnapshot();
+      var v = valueOf(s);
+      var promise;
+      if (mode === 'default') {
+        promise = Promise.resolve(scope.set('default', { enabled: nextEnabled, text: nextText }));
+      } else {
+        var sessions = v.sessions && typeof v.sessions === 'object' ? Object.assign({}, v.sessions) : {};
+        var d = v.default && typeof v.default === 'object' ? v.default : {};
+        var dText = typeof d.text === 'string' ? d.text.trim() : '';
+        if (nextEnabled === (d.enabled === true) && nextText === dText) {
+          if (Object.prototype.hasOwnProperty.call(sessions, sessionId)) {
+            delete sessions[sessionId];
+            promise = Promise.resolve(scope.set('sessions', sessions));
+          } else {
+            promise = Promise.resolve();
+          }
+        } else {
+          sessions[sessionId] = { enabled: nextEnabled, text: nextText };
+          promise = Promise.resolve(scope.set('sessions', sessions));
+        }
+      }
+      promise.then(function () {
+        // 读回校验（与 save 一致，防框架静默 resolve / 并发丢记录）
+        var s2 = scope.getSnapshot();
+        var v2 = valueOf(s2);
+        var ok;
+        if (mode === 'default') {
+          var d2 = defaultOf(s2);
+          ok = d2.enabled === nextEnabled && (typeof d2.text === 'string' ? d2.text.trim() : '') === nextText;
+        } else {
+          var cur = v2.sessions && typeof v2.sessions === 'object' ? v2.sessions[sessionId] : undefined;
+          var d2b = v2.default && typeof v2.default === 'object' ? v2.default : {};
+          var d2bText = typeof d2b.text === 'string' ? d2b.text.trim() : '';
+          var matchesDefault = nextEnabled === (d2b.enabled === true) && nextText === d2bText;
+          ok = matchesDefault
+            ? cur === undefined
+            : cur !== undefined && cur.enabled === nextEnabled && (typeof cur.text === 'string' ? cur.text.trim() : '') === nextText;
+        }
+        if (ok) {
+          lastSavedRef.current = { enabled: nextEnabled, text: nextText };
+          setEnabled(nextEnabled);
+          setToast({ type: 'ok', text: t('savedToast') });
+        } else {
+          setToast({ type: 'err', text: t('saveError') + ': 保存冲突，请重试' });
+        }
+      }).catch(function (e) {
+        setToast({ type: 'err', text: t('saveError') + ((e && e.message) ? ': ' + e.message : '') });
+      }).then(function () {
+        persistBusyRef.current = false;
+      });
+    }
+
     function inheritDefault() {
       if (saving) return;
       setSaving(true);
@@ -621,7 +681,7 @@ window.__ModuleLoader__.load({
           React.createElement('p', { className: 'si-desc' }, t('descDefault'))),
         React.createElement('hr', { className: 'si-divider' }),
         React.createElement('div', { className: 'si-enable' },
-          React.createElement('button', { type: 'button', role: 'switch', 'aria-checked': enabled, className: 'si-switch' + (enabled ? ' on' : ''), onClick: function () { setEnabled(!enabled); }, 'aria-label': t('defaultEnableLabel') },
+          React.createElement('button', { type: 'button', role: 'switch', 'aria-checked': enabled, className: 'si-switch' + (enabled ? ' on' : ''), onClick: function () { persistIdentity(!enabled); }, 'aria-label': t('defaultEnableLabel') },
             React.createElement('span', { className: 'si-switch-thumb' })),
           React.createElement('div', { className: 'si-enable-text' },
             React.createElement('div', { className: 'si-enable-label' }, t('defaultEnableLabel')),
@@ -643,7 +703,7 @@ window.__ModuleLoader__.load({
         React.createElement('div', { className: 'si-actions' },
           dirty ? React.createElement('span', { className: 'si-unsaved', role: 'status' }, t('unsaved')) : null,
           React.createElement('button', { type: 'button', className: 'si-btn si-reset', onClick: function () { setEnabled(dflt.enabled); setText(dflt.text); } }, t('reset')),
-          React.createElement('button', { type: 'button', className: 'si-btn si-save', disabled: saving || !enabled || !dirty || overLimit, onClick: saveDefault },
+          React.createElement('button', { type: 'button', className: 'si-btn si-save', disabled: saving || !dirty || overLimit, onClick: saveDefault },
             saving ? React.createElement(React.Fragment, null,
               React.createElement('span', { className: 'si-spinner', 'aria-hidden': true }), t('saving')) : t('save'))),
         toast ? React.createElement(SiToast, { toast: toast }) : null);
@@ -662,7 +722,7 @@ window.__ModuleLoader__.load({
         React.createElement('p', { className: 'si-desc' }, t('desc'))),
       React.createElement('hr', { className: 'si-divider' }),
       React.createElement('div', { className: 'si-enable' },
-        React.createElement('button', { type: 'button', role: 'switch', 'aria-checked': enabled, className: 'si-switch' + (enabled ? ' on' : ''), onClick: function () { setEnabled(!enabled); }, 'aria-label': t('enableLabel') },
+        React.createElement('button', { type: 'button', role: 'switch', 'aria-checked': enabled, className: 'si-switch' + (enabled ? ' on' : ''), onClick: function () { persistIdentity(!enabled); }, 'aria-label': t('enableLabel') },
           React.createElement('span', { className: 'si-switch-thumb' })),
         React.createElement('div', { className: 'si-enable-text' },
           React.createElement('div', { className: 'si-enable-label' }, t('enableLabel')),
@@ -693,7 +753,7 @@ window.__ModuleLoader__.load({
         React.createElement('div', { className: 'si-actions' },
           dirty ? React.createElement('span', { className: 'si-unsaved', role: 'status' }, t('unsaved')) : null,
           React.createElement('button', { type: 'button', className: 'si-btn si-reset', onClick: function () { setEnabled(lastSavedRef.current.enabled); setText(lastSavedRef.current.text); } }, t('reset')),
-          React.createElement('button', { type: 'button', className: 'si-btn si-save', disabled: saving || !enabled || !dirty || overLimit, onClick: save },
+          React.createElement('button', { type: 'button', className: 'si-btn si-save', disabled: saving || !dirty || overLimit, onClick: save },
             saving ? React.createElement(React.Fragment, null,
               React.createElement('span', { className: 'si-spinner', 'aria-hidden': true }), t('saving')) : t('save')))),
       toast ? React.createElement(SiToast, { toast: toast }) : null);
@@ -865,7 +925,7 @@ window.__ModuleLoader__.load({
     '.si-dot{position:absolute;right:2px;bottom:2px;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--dsw-alias-bg-layer-1,#fff);box-sizing:border-box}',
     '.si-dot.custom{background:#23A05C}',
     '.si-dot.default{background:#3370FF}',
-    '.si-dot.off{background:transparent;border-color:var(--dsw-alias-label-secondary,#8F959E)}',
+    '.si-dot.off{background:var(--dsw-alias-label-secondary,#8F959E)}',
     '@keyframes si-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}',
     '@keyframes si-spin{to{transform:rotate(360deg)}}',
     '@media (prefers-color-scheme:dark){.si-mask{background:rgba(0,0,0,.55)}.si-badge.custom{background:rgba(35,160,92,.18);color:#3CC97A}.si-badge.default{background:rgba(51,112,255,.16);color:#A8C2FF}.si-badge.off{background:#2A2E34;color:#A9AEB8}.si-notice{background:rgba(51,112,255,.16);color:#A8C2FF}}',
@@ -1193,6 +1253,8 @@ collect('global-prompt', apply);
     var restartTimeoutMs = 90000;
     var restartPollMs = 1000;
     var restartFillMs = 600;
+    // 连续失败阈值：达到该次数才判定"观测到服务器中断"，防单次网络抖动假中断
+    var restartFailThreshold = 2;
 
     var zh = {
       label: '重启服务',
@@ -1203,6 +1265,7 @@ collect('global-prompt', apply);
       phase2: '正在启动服务…',
       phase3: '正在恢复连接…',
       ready: '服务已恢复，即将刷新…',
+      noRestart: '未检测到服务重启，可能重启脚本未执行；请手动刷新。',
       timeout: '重启超时，请检查服务或手动刷新。',
       refresh: '手动刷新',
     };
@@ -1216,15 +1279,18 @@ collect('global-prompt', apply);
       phase2: 'Starting service…',
       phase3: 'Restoring connection…',
       ready: 'Service restored, refreshing…',
+      noRestart: 'No restart detected. The restart script may not have run; refresh manually.',
       timeout: 'Restart timed out. Check the service or refresh manually.',
       refresh: 'Refresh now',
     };
 
     /**
-     * 全屏重启覆盖层（探测驱动版）：
+     * 全屏重启覆盖层（中断恢复探测版）：
      * - 进入立即 5%（请求已发送）；轮询失败期间 progress = 5 + min(85, elapsedSec/90*85) 平滑渐近 90% 上限；
-     * - 轮询（1s）探测成功后 progress 90→100 约 600ms 补满，随后 location.reload()；
-     * - 阶段文案与进度解耦（按 elapsed 细化）；90s 超时兜底（轮询继续 + 手动刷新）。
+     * - 轮询（restartPollMs）GET /api/restart：失败（reject/!ok）连续达到 restartFailThreshold 次 → interruptedRef=true（观测到中断）；
+     * - 成功且 interruptedRef 为 true → 判定"真重启完成"（中断后恢复）→ progress 90→100 约 600ms 补满 → location.reload()；
+     * - 成功但 interruptedRef 为 false → 全程可达，判定"可能未重启"，不 reload，继续轮询至超时；
+     * - 90s 超时兜底：从未中断（全程可达）显示 noRestart 提示，否则显示 timeout 提示，均提供手动刷新。
      */
     function RestartOverlay(props) {
       var t = props.t;
@@ -1234,29 +1300,47 @@ collect('global-prompt', apply);
       var useRef = react.useRef;
       var startRef = useRef(Date.now());
       var detectedAtRef = useRef(null);
+      var interruptedRef = useRef(false);
+      var failCountRef = useRef(0);
       var tickState = useState(0);
       var detectedState = useState(false);
       var timedOutState = useState(false);
+      var noRestartState = useState(false);
       var detected = detectedState[0], setDetected = detectedState[1];
       var timedOut = timedOutState[0], setTimedOut = timedOutState[1];
+      var noRestart = noRestartState[0], setNoRestart = noRestartState[1];
 
       useEffect(function () {
         // 定时器走 timer 服务（ctx.timeout/ctx.interval）：插件 fiber 生命周期兜底；
         // cleanup 调用 disposer 停止（组件卸载即停，幂等）。
         var reloadTimer = null;
-        var timeoutTimer = ctx.timeout(function () { setTimedOut(true); }, restartTimeoutMs);
-        // 轮询 1s：恢复检测更实时；成功即进入补满动画（600ms 后 reload）
+        var timeoutTimer = ctx.timeout(function () {
+          setTimedOut(true);
+          // 超时时区分：从未中断（全程可达）= 未检测到重启；中断过未恢复 = 重启未完成
+          if (!interruptedRef.current) setNoRestart(true);
+        }, restartTimeoutMs);
+        // 轮询 GET /api/restart：失败连续达到阈值才判定"观测到中断"；中断后恢复才算真重启。
         var poll = ctx.interval(function () {
           fetch('/api/restart', { method: 'GET', cache: 'no-store' })
             .then(function (r) { return r.ok; })
             .catch(function () { return false; })
             .then(function (ok) {
               if (ok) {
-                detectedAtRef.current = Date.now();
-                setDetected(true);
-                poll();
-                timeoutTimer();
-                reloadTimer = ctx.timeout(function () { location.reload(); }, restartFillMs);
+                failCountRef.current = 0;
+                if (interruptedRef.current) {
+                  // 真重启（中断后恢复）→ 补满动画 → reload
+                  detectedAtRef.current = Date.now();
+                  setDetected(true);
+                  poll();
+                  timeoutTimer();
+                  reloadTimer = ctx.timeout(function () { location.reload(); }, restartFillMs);
+                }
+                // interruptedRef 为 false（全程可达）：可能是 stop 慢/脚本未执行，不 reload，继续等待
+              } else {
+                failCountRef.current += 1;
+                if (failCountRef.current >= restartFailThreshold) {
+                  interruptedRef.current = true;
+                }
               }
             });
         }, restartPollMs);
@@ -1304,7 +1388,7 @@ collect('global-prompt', apply);
               timedOut ? react_jsx_runtime.jsxs('div', {
                 className: 'wr-timeout',
                 children: [
-                  react_jsx_runtime.jsx('div', { children: t('timeout') }),
+                  react_jsx_runtime.jsx('div', { children: t(noRestart ? 'noRestart' : 'timeout') }),
                   react_jsx_runtime.jsx('button', { type: 'button', className: 'wr-refresh', onClick: function () { location.reload(); }, children: t('refresh') }),
                 ],
               }) : null,
@@ -1355,6 +1439,7 @@ collect('global-prompt', apply);
       restartTimeoutMs = (cfg && typeof cfg.restartTimeoutMs === 'number') ? cfg.restartTimeoutMs : 90000;
       restartPollMs = (cfg && typeof cfg.restartPollMs === 'number') ? cfg.restartPollMs : 1000;
       restartFillMs = (cfg && typeof cfg.restartFillMs === 'number') ? cfg.restartFillMs : 600;
+      restartFailThreshold = (cfg && typeof cfg.restartFailThreshold === 'number') ? cfg.restartFailThreshold : 2;
       injectCss();
       var locale = ctx.get('locale');
       var slots = ctx.get('slots');

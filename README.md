@@ -9,7 +9,7 @@ Consolidated plugin toolkit for the DeepSeek Harness. Six previously separate lo
 - **Session Identity** — a per-session persona prompt injected into that session's system prompt (independent section `session-identity`, order 55, resolved per agent at every assembly), with a default identity and per-session overrides. UI: identity dialog (enable switch, 4000-char soft limit, save/reset, edit default, inherit default) and status buttons in both `conversation.session.header.actions` (id `session-identity`, order 40) and `conversation.input.left` (id `session-identity-input`, order 40).
 - **Global Prompt** — a settings page (`settings.section`, id `global-prompt`, order 30) injecting one prompt into every conversation's system prompt (section `global-prompt`, order 50). `{` runs are spaced out (`/\{+/g`) to avoid prompt-variable conflicts.
 - **Session Auto-Resume** — sessions with the per-session switch on are resumed automatically after a GUI restart (`ctx.agents.resume`, carrying the default model from `agentDefaultModel`); switching a session on resumes it immediately (false→true edge). Filters: switch on, top-level only (no subagent origin, no `delegationDepth > 0`, no `parentSession`), non-blank (`seedLength !== 0`). Concurrency-bounded (`CONCURRENCY = 3`) with per-item failure isolation and an in-flight set against duplicate resume.
-- **Web Restart** — a "Restart service" entry in the General settings (`settings.general.item`, id `web-restart`, order 90) that restarts the GUI server with **no UAC prompt** (the spawn inherits the server process token, so the restart script's elevated branch is never reached) and shows a full-screen progress overlay (probe-driven progress, fill-up animation before reload, 90 s timeout fallback with manual refresh). Routes: `GET /api/restart` (health probe, constant 200) and `POST /api/restart` (trigger, 409 while a restart is in flight, 202 + 500 ms buffer before spawn).
+- **Web Restart** — a "Restart service" entry in the General settings (`settings.general.item`, id `web-restart`, order 90) that restarts the GUI server with **no UAC prompt** (the spawn inherits the server process token, so the restart script's elevated branch is never reached) and shows a full-screen progress overlay (probe-driven progress, fill-up animation before reload, 90 s timeout fallback with manual refresh). Routes: `GET /api/restart` (health probe, constant 200) and `POST /api/restart` (trigger, 409 while a restart is in flight, 202 + 500 ms buffer before spawn). Recovery is detected by **interruption-then-restore**: the overlay only reloads after it observes the probe fail for `client.restartFailThreshold` consecutive checks and then return 200 again; if the probe is reachable the whole time it reports "no restart detected" (`noRestart`) until the timeout, offering a manual refresh.
 - **Session-Log Button Relocation** — shadows the official download button in `conversation.session.header.utilities` (same id `session-log-download`, priority −1, cell-shadowing) and registers a copy in `conversation.session.header.actions` (id `session-log-download-moved`, order 41), reusing the official `sessionLogDownload` controller (`ctx.get('sessionLogDownload')`) so download behavior stays identical to stock.
 - **Peer Messaging** — `send_to_session` / `list_sessions` tools on the host plane (session addressing by id or workspace path, wakeup delivery) plus a "copy session ID" button in both `conversation.session.header.actions` (id `copy-session-id`, order 30) and `conversation.input.left` (id `copy-session-id-input`, order 30). Outgoing message content is converted to plain text (`toPlainText`) before delivery so recipients see tidy text rather than raw markdown.
 
@@ -65,6 +65,7 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
       restartTimeoutMs: 90000
       restartPollMs: 1000
       restartFillMs: 600
+      restartFailThreshold: 2
       copyFeedbackMs: 1600
 ```
 
@@ -80,6 +81,7 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 | `client.restartTimeoutMs` | 90000 | Restart overlay timeout before the manual-refresh hint. |
 | `client.restartPollMs` | 1000 | Restart health-poll interval. |
 | `client.restartFillMs` | 600 | Progress fill animation after recovery detected. |
+| `client.restartFailThreshold` | 2 | Consecutive failed health polls before an interruption is considered observed. |
 | `client.copyFeedbackMs` | 1600 | Copy-feedback checkmark duration. |
 
 ## Deployment
@@ -150,6 +152,7 @@ Each section's rendered text is a fixed part of the request prefix while its set
 - Loose emphasis matching in `toPlainText` can drop `*` pairs in non-format positions (e.g. `a * b * c`); acceptable for agent-generated messages, boundary tightening is optional.
 - The aggregate `inject` union waits for every listed service; a profile missing one service delays the whole package (web profile provides all of them today).
 - `ctx.get('agentDefaultModel')` is resolved at `apply` time (non-lazy); the gateway mounts the service before this package, so the web profile always has a value.
+- **Restart probe window** — a restart is only detected when the health probe fails for `restartFailThreshold × restartPollMs` (default 2 × 1000 ms = 2 s) and then recovers. If a relaunch completes in under that window, the overlay can misreport "no restart detected" (`noRestart`); lowering `restartFailThreshold` to 1 makes detection more sensitive but also lets a single transient failure masquerade as a restart interruption.
 
 ## Recovery
 
