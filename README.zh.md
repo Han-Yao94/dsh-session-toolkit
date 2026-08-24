@@ -45,7 +45,6 @@ DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件
 | `workspace-prompt` | `{ workspaces: Record<path,{enabled, content, files: string[]}>, removed: string[] }` | 按工作区提示词。某会话会得到与其 `cwd` 目录前缀匹配、路径最深（最具体）且启用的工作区提示词。`removed` 记录用户已移除的路径，使活跃工作区同步不重新补回。 |
 | `workspace-registry-active` | `{ active: [{path, sessionCount}] }` | 活跃工作区只读投影，来自 **`ctx.agents.roots()`**（各 agent 的 `session.header.cwd` 去重计数）。**不**来自 `workspaceRegistry`（该服务在本插件作用域不可见）。 |
 | `prompt-file-status` | `{ byScope: Record<global\|path, [{filePath, status: 'ok'\|'fail', charCount?, reason?}]> }` | 各作用域引用文件的最近读取结果只读投影；UI 的 `FileRefsPanel` 读取显示 `ok: N 字符` / `fail: 原因`。 |
-| `file-blocklist` | `{ global: string[], sessions: Record<sessionId, string[]> }` | 屏蔽文件 glob 列表（`**`/`*`/`?`，路径大小写不敏感）。read/read_image 等工具可靠拦截；shell 命令文本启发式（字面路径包含或模式正则匹配）。**边界**：shell 间接读取（变量展开、改名复制、拼接）不保证拦截。 |
 
 ### 插件 Config（cordis）
 

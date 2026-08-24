@@ -45,7 +45,6 @@ Settings namespaces (schema-validated, `applies: live`, persisted in `settings.y
 | `workspace-prompt` | `{ workspaces: Record<path,{enabled, content, files: string[]}>, removed: string[] }` | Per-workspace prompt. A session gets the most-specific (longest matching path) enabled workspace whose directory prefix-matches its `cwd`. `removed` lists paths the user removed so the active-workspace sync never re-adds them. |
 | `workspace-registry-active` | `{ active: [{path, sessionCount}] }` | Read-only projection of live workspaces aggregated from **`ctx.agents.roots()`** (each agent's `session.header.cwd`, deduped and counted). Never sourced from `workspaceRegistry` (which is not visible in this plugin's scope). |
 | `prompt-file-status` | `{ byScope: Record<global\|path, [{filePath, status: 'ok'\|'fail', charCount?, reason?}]> }` | Read-only projection of the most recent read result of each scoped referenced file; the UI's `FileRefsPanel` reads it to show `ok: N chars` / `fail: reason`. |
-| `file-blocklist` | `{ global: string[], sessions: Record<sessionId, string[]> }` | Glob patterns of files never loaded into the model context (`**`/`*`/`?`, case-insensitive paths). Reliably blocked for read-like tools; shell command text heuristic (literal path inclusion or pattern regex). **Boundary**: shell indirect reads (variable expansion, renamed copies, concatenation) are not guaranteed. |
 
 ### Plugin Config (cordis)
 

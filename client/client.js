@@ -63,14 +63,6 @@ window.__ModuleLoader__.load({
     autoResumeLabel: '重启后自动上线',
     autoResumeHint: '开启后，每次重启 GUI 该会话自动恢复在线；关闭不影响当前状态，仅影响下次重启。',
     autoResumeError: '保存失败，请重试',
-    blockLabel: '屏蔽文件',
-    blockGlobalLabel: '全局屏蔽文件',
-    blockHint: '指定文件的内容不会进入模型上下文（read 等工具可靠拦截；shell 间接读取如变量/改名复制不保证）。支持 glob：**、*、?。',
-    blockPlaceholder: '添加 glob 模式，如 **/AGENTS.md',
-    blockAdd: '添加',
-    blockRemove: '移除',
-    blockSaveError: '保存失败',
-    blockSaveConflict: '保存冲突，请重试',
   };
 
   var en = {
@@ -108,14 +100,6 @@ window.__ModuleLoader__.load({
     autoResumeLabel: 'Auto-resume after restart',
     autoResumeHint: 'When on, this session resumes online automatically after each GUI restart; turning off does not affect the current state, only the next restart.',
     autoResumeError: 'Failed to save, please retry',
-    blockLabel: 'Blocked files',
-    blockGlobalLabel: 'Global blocked files',
-    blockHint: 'Files matching these patterns never enter the model context (reliably blocked for read-like tools; shell indirect reads like variables/renames are not guaranteed). Glob: **, *, ?.',
-    blockPlaceholder: 'Add glob, e.g. **/AGENTS.md',
-    blockAdd: 'Add',
-    blockRemove: 'Remove',
-    blockSaveError: 'Save failed',
-    blockSaveConflict: 'Save conflict, retry',
   };
 
   function UserIcon() {
@@ -294,112 +278,12 @@ window.__ModuleLoader__.load({
   }
 
 
-  // 文件屏蔽列表编辑器（会话级或全局复用：mode='session' 写 sessions[id]，mode='global' 写 global）。
-  function BlocklistEditor(props) {
-    var t = props.t;
-    var scope = props.scope;
-    var sessionId = props.sessionId;
-    var mode = props.mode;
-    var ctx = props.ctx;
-    var useState = React.useState;
-    var useEffect = React.useEffect;
-    var snap = scope.getSnapshot();
-    var v = (snap && snap.value && typeof snap.value === 'object') ? snap.value : {};
-    var initial = mode === 'global'
-      ? (Array.isArray(v.global) ? v.global.slice() : [])
-      : (v.sessions && Array.isArray(v.sessions[sessionId]) ? v.sessions[sessionId].slice() : []);
-    var listState = useState(initial);
-    var list = listState[0], setList = listState[1];
-    var inputState = useState('');
-    var input = inputState[0], setInput = inputState[1];
-    var errState = useState(null);
-    var err = errState[0], setErr = errState[1];
-
-    function readList(v2) {
-      return mode === 'global'
-        ? (Array.isArray(v2.global) ? v2.global : [])
-        : (v2.sessions && Array.isArray(v2.sessions[sessionId]) ? v2.sessions[sessionId] : []);
-    }
-
-    useEffect(function () {
-      return scope.subscribe(function () {
-        var s2 = scope.getSnapshot();
-        var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
-        setList(readList(v2));
-      });
-    }, []);
-
-    function persist(next) {
-      var s2 = scope.getSnapshot();
-      var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
-      var promise;
-      if (mode === 'global') {
-        promise = Promise.resolve(scope.set('global', next));
-      } else {
-        var sessions = v2.sessions && typeof v2.sessions === 'object' ? Object.assign({}, v2.sessions) : {};
-        sessions[sessionId] = next;
-        promise = Promise.resolve(scope.set('sessions', sessions));
-      }
-      promise.then(function () {
-        // 读回校验（沿用现有模式）
-        var s3 = scope.getSnapshot();
-        var v3 = (s3 && s3.value && typeof s3.value === 'object') ? s3.value : {};
-        var cur = readList(v3);
-        if (JSON.stringify(cur) === JSON.stringify(next)) {
-          setList(next);
-          setErr(null);
-        } else {
-          setErr(t('blockSaveConflict'));
-          ctx.timeout(function () { setErr(null); }, 2000);
-        }
-      }).catch(function () {
-        setErr(t('blockSaveError'));
-        ctx.timeout(function () { setErr(null); }, 2000);
-      });
-    }
-
-    function addItem() {
-      var val = input.trim();
-      if (!val) return;
-      if (list.indexOf(val) !== -1) { setInput(''); return; }
-      persist(list.concat([val]));
-      setInput('');
-    }
-    function removeItem(idx) {
-      var next = list.slice();
-      next.splice(idx, 1);
-      persist(next);
-    }
-
-    if (!snap || snap.status === 'loading' || snap.status === 'unavailable') return null; // hooks 已固定
-
-    return React.createElement('div', { className: 'si-blocklist' },
-      React.createElement('div', { className: 'si-blocklist-label' }, mode === 'global' ? t('blockGlobalLabel') : t('blockLabel')),
-      React.createElement('div', { className: 'si-blocklist-hint' }, t('blockHint')),
-      React.createElement('div', { className: 'si-blocklist-input-row' },
-        React.createElement('input', {
-          className: 'si-blocklist-input',
-          value: input,
-          placeholder: t('blockPlaceholder'),
-          spellCheck: false,
-          onChange: function (e) { setInput(e.target.value); },
-          onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); addItem(); } },
-        }),
-        React.createElement('button', { type: 'button', className: 'si-blocklist-add', onClick: addItem }, t('blockAdd'))),
-      list.length > 0 ? React.createElement('ul', { className: 'si-blocklist-list' }, list.map(function (item, idx) {
-        return React.createElement('li', { className: 'si-blocklist-item', key: String(idx) },
-          React.createElement('span', { className: 'si-blocklist-item-text' }, item),
-          React.createElement('button', { type: 'button', className: 'si-blocklist-remove', onClick: function () { removeItem(idx); }, 'aria-label': t('blockRemove') }, '×'));
-      })) : null,
-      err ? React.createElement('div', { className: 'si-blocklist-err', role: 'status' }, err) : null);
-  }
   function IdentityButton(props) {
     var t = props.t;
     var scope = props.scope;
     var sessionId = props.sessionId;
     var owner = props.owner;
     var autoResumeScope = props.autoResumeScope;
-    var blocklistScope = props.blocklistScope;
     var floating = useFloating(sessionId, owner);
     var open = floating[0];
 
@@ -432,7 +316,6 @@ window.__ModuleLoader__.load({
       open ? React.createElement(IdentityDialog, {
         t: t, scope: scope, sessionId: sessionId, ctx: props.ctx,
         autoResumeScope: autoResumeScope,
-        blocklistScope: blocklistScope,
         onClose: closeFloating,
       }) : null);
   }
@@ -444,7 +327,6 @@ window.__ModuleLoader__.load({
     var ctx = props.ctx;
     var onClose = props.onClose;
     var autoResumeScope = props.autoResumeScope;
-    var blocklistScope = props.blocklistScope;
 
     var modeState = React.useState('session');
     var mode = modeState[0], setMode = modeState[1];
@@ -687,10 +569,6 @@ window.__ModuleLoader__.load({
             React.createElement('span', { className: countClass }, String(count) + ' 字符')),
           React.createElement('textarea', { id: 'si-area-default', className: 'si-area', value: text, disabled: !enabled, spellCheck: false, placeholder: t('placeholder'), onChange: function (e) { setText(e.target.value); } })),
         React.createElement('hr', { className: 'si-divider' }),
-        blocklistScope ? React.createElement(BlocklistEditor, {
-          t: t, scope: blocklistScope, mode: 'global', ctx: ctx,
-        }) : null,
-        React.createElement('hr', { className: 'si-divider' }),
         React.createElement('div', { className: 'si-actions' },
           dirty ? React.createElement('span', { className: 'si-unsaved', role: 'status' }, t('unsaved')) : null,
           React.createElement('button', { type: 'button', className: 'si-btn si-reset', onClick: function () { setEnabled(dflt.enabled); setText(dflt.text); } }, t('reset')),
@@ -730,9 +608,6 @@ window.__ModuleLoader__.load({
         React.createElement('span', { className: 'si-inherit-hint' }, t('inheritDefaultHint'))),
       autoResumeScope ? React.createElement(AutoResumeRow, {
         t: t, scope: autoResumeScope, sessionId: sessionId, ctx: ctx,
-      }) : null,
-      blocklistScope ? React.createElement(BlocklistEditor, {
-        t: t, scope: blocklistScope, sessionId: sessionId, mode: 'session', ctx: ctx,
       }) : null,
       React.createElement('hr', { className: 'si-divider' }),
       React.createElement('div', { className: 'si-actions-between' },
@@ -784,8 +659,6 @@ window.__ModuleLoader__.load({
     // 自动上线开关命名空间（dsh-auto-resume host 注册）；bind 失败/未注册时开关行隐藏
     var autoResumeScope = null;
     try { autoResumeScope = settingsScope.bind({ namespace: 'session-auto-resume' }); } catch (e) { autoResumeScope = null; }
-    var blocklistScope = null;
-    try { blocklistScope = settingsScope.bind({ namespace: 'file-blocklist' }); } catch (e) { blocklistScope = null; }
     slots.inject('conversation.session.header.actions', function () {
       return slots.register({
         name: 'conversation.session.header.actions',
@@ -801,7 +674,6 @@ window.__ModuleLoader__.load({
           ctx: ctx,
           t: t,
           autoResumeScope: autoResumeScope,
-          blocklistScope: blocklistScope,
         });
       });
     });
@@ -822,7 +694,6 @@ window.__ModuleLoader__.load({
           ctx: ctx,
           t: t,
           autoResumeScope: autoResumeScope,
-          blocklistScope: blocklistScope,
         });
       });
     });
@@ -895,18 +766,6 @@ window.__ModuleLoader__.load({
     '.si-toast.ok{color:#23A05C}',
     '.si-toast.err{color:#F53F3F}',
     '.si-busy{padding:48px 24px;text-align:center;color:var(--dsw-alias-label-secondary,#646A73)}',
-    '.si-blocklist{display:flex;flex-direction:column;gap:6px;margin-top:14px}',
-    '.si-blocklist-label{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary)}',
-    '.si-blocklist-hint{font-size:12px;color:var(--dsw-alias-label-secondary)}',
-    '.si-blocklist-input-row{display:flex;gap:8px}',
-    '.si-blocklist-input{flex:1;min-width:0;height:30px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px}',
-    '.si-blocklist-input:focus{outline:none;border-color:#3370FF;box-shadow:0 0 0 3px rgba(51,112,255,.15)}',
-    '.si-blocklist-add{flex:none;height:30px;padding:0 14px;border:none;border-radius:6px;background:#3370FF;color:#fff;font-size:13px;cursor:pointer}',
-    '.si-blocklist-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}',
-    '.si-blocklist-item{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-2);font-size:12px}',
-    '.si-blocklist-item-text{flex:1;min-width:0;overflow-wrap:break-word;color:var(--dsw-alias-label-primary)}',
-    '.si-blocklist-remove{flex:none;border:none;background:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:14px;line-height:1}',
-    '.si-blocklist-err{font-size:12px;color:#F53F3F}',
     '.si-busy-err{color:#F53F3F}',
     '.si-dot{position:absolute;right:2px;bottom:2px;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--dsw-alias-bg-layer-1,#fff);box-sizing:border-box}',
     '.si-dot.custom{background:#23A05C}',
