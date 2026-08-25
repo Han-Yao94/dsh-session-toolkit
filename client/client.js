@@ -1041,7 +1041,7 @@ collect('identity', apply);
     var countClass = 'dsw-count' + (count > CHAR_LIMIT ? ' dsw-count-error' : (count > CHAR_WARN_AT ? ' dsw-count-warn' : ''));
     var disabled = !enabled;
     var dirty = enabled !== lastSavedRef.current.enabled || content !== lastSavedRef.current.content;
-    var rowTitle = active ? (path + ' · ' + String(sessionCount) + ' ' + t('sessionUnit')) : (path + ' · ' + t('inactive'));
+    var rowTitle = active ? path : (path + ' · ' + t('inactive'));
     var areaId = 'dsw-ws-' + path;
 
     return React.createElement(primitives.DisclosureRow, {
