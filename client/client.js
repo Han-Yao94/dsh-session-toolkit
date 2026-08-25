@@ -9,6 +9,7 @@ window.__ModuleLoader__.load({
     // client Config：cordis 注入（默认值=现状）；schemastery 在 client bundle 不可用时降级（不导出 Config、默认值兜底）
     var z = null;
     try { z = require('@deepseek-ai/schemastery'); } catch (e) { z = null; }
+    // 【提醒】新增 client 分键必须同步两处 schema：本 ClientConfig + lib/index.js 的 Config.client（否则 schemastery 丢弃该键，配置失效）
     var ClientConfig = z === null ? null : z.object({
       identityCharLimit: z.number().default(4000),
       restartTimeoutMs: z.number().default(90000),
@@ -16,6 +17,7 @@ window.__ModuleLoader__.load({
       restartFillMs: z.number().default(600),
       copyFeedbackMs: z.number().default(1600),
       restartFailThreshold: z.number().default(2),
+      restartSettleMs: z.number().default(8000),
     });
 
     // ===== 模块 1：会话身份（identity，含自动上线开关行、header/input 双入口）=====
@@ -1456,6 +1458,8 @@ collect('identity', apply);
     var restartFillMs = 600;
     // 连续失败阈值：达到该次数才判定"观测到服务器中断"，防单次网络抖动假中断
     var restartFailThreshold = 2;
+    // 恢复后再额外等待的稳定窗口（ms）：给 DSH 后端会话数据就绪留时间，避免 reload 过早导致导航栏标题 fallback
+    var restartSettleMs = 8000;
 
     var zh = {
       label: '重启服务',
@@ -1534,7 +1538,7 @@ collect('identity', apply);
                   setDetected(true);
                   poll();
                   timeoutTimer();
-                  reloadTimer = ctx.timeout(function () { location.reload(); }, restartFillMs);
+                  reloadTimer = ctx.timeout(function () { location.reload(); }, restartFillMs + restartSettleMs);
                 }
                 // interruptedRef 为 false（全程可达）：可能是 stop 慢/脚本未执行，不 reload，继续等待
               } else {
@@ -1641,6 +1645,7 @@ collect('identity', apply);
       restartPollMs = (cfg && typeof cfg.restartPollMs === 'number') ? cfg.restartPollMs : 1000;
       restartFillMs = (cfg && typeof cfg.restartFillMs === 'number') ? cfg.restartFillMs : 600;
       restartFailThreshold = (cfg && typeof cfg.restartFailThreshold === 'number') ? cfg.restartFailThreshold : 2;
+      restartSettleMs = (cfg && typeof cfg.restartSettleMs === 'number') ? cfg.restartSettleMs : 8000;
       injectCss();
       var locale = ctx.get('locale');
       var slots = ctx.get('slots');

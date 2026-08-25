@@ -71,6 +71,7 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
       restartPollMs: 1000
       restartFillMs: 600
       restartFailThreshold: 2
+      restartSettleMs: 8000
       copyFeedbackMs: 1600
 ```
 
@@ -88,6 +89,7 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 | `client.restartPollMs` | 1000 | Restart health-poll interval. |
 | `client.restartFillMs` | 600 | Progress fill animation after recovery detected. |
 | `client.restartFailThreshold` | 2 | Consecutive failed health polls before an interruption is considered observed. |
+| `client.restartSettleMs` | 8000 | Settle window (ms) after recovery before the auto-reload. DSH session titles are **generated asynchronously by the LLM** with no "ready" signal, so this is the wait window for the first post-restart reload to reduce the title fallback (showing the workspace name). If a session title still shows the workspace name, refresh manually or raise this value. A full fix requires DSH to expose a "titles ready" signal. |
 | `client.copyFeedbackMs` | 1600 | Copy-feedback checkmark duration. |
 
 ## Deployment

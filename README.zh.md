@@ -71,6 +71,7 @@ DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件
       restartPollMs: 1000
       restartFillMs: 600
       restartFailThreshold: 2
+      restartSettleMs: 8000
       copyFeedbackMs: 1600
 ```
 
@@ -88,6 +89,7 @@ DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件
 | `client.restartPollMs` | 1000 | 重启健康轮询间隔。 |
 | `client.restartFillMs` | 600 | 检测到恢复后的进度填充动画时长。 |
 | `client.restartFailThreshold` | 2 | 判定中断前的连续健康轮询失败次数。 |
+| `client.restartSettleMs` | 8000 | 检测到恢复后、自动刷新前的稳定窗口（ms）。DSH 会话标题由 **LLM 异步生成**、无就绪信号，此值是"重启后首轮 reload 的等待窗口"，用于改善标题 fallback（显示为工作区名）。若个别会话标题仍显示工作区名，可手动刷新或调大该键；根治需 DSH 提供"标题就绪"信号（建议向 DSH 反馈）。 |
 | `client.copyFeedbackMs` | 1600 | 复制反馈对勾时长。 |
 
 ## 部署
