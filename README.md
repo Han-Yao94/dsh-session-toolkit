@@ -77,12 +77,12 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `identity.maxText` | 8000 | Identity text clip limit (chars, token guard). |
+| `identity.maxText` | 8000 | Identity text clip limit (chars, token guard). UI soft limit is `client.identityCharLimit` (4000, editor); **host hard-clip** is this value (8000). |
 | `identity.sectionOrder` | 40 | System-prompt order of the identity section. **Migration**: users who explicitly pinned `identity.sectionOrder: 55` must set it to 40 to keep the identity-before-global ordering. |
 | `globalPrompt.sectionOrder` | 50 | System-prompt order of the global prompt section. |
 | `globalPrompt.workspaceSectionOrder` | 60 | System-prompt order of the workspace prompt section (placed last). |
 | `autoResume.concurrency` | 3 | Max in-flight resumes during startup restore. |
-| `webRestart.scriptPath` | derived | Restart script path; default `<DSH_HOME>/autostart/dsh-web-restart.cmd` via dsh-home-paths. |
+| `webRestart.scriptPath` | derived | Restart script path; default `<DSH_HOME>/autostart/dsh-web-restart.cmd` via dsh-home-paths. Setting it to an **empty string** derives it at runtime via dsh-home-paths (no explicit config needed). |
 | `webRestart.spawnDelayMs` | 500 | Delay before spawning the restart script (202 buffer). |
 | `client.identityCharLimit` | 4000 | Identity editor character limit (UI soft limit). |
 | `client.restartTimeoutMs` | 90000 | Restart overlay timeout before the manual-refresh hint. |
@@ -117,7 +117,7 @@ For iterating on the source without publishing, install the checkout directly (`
 
 ### Share & Install
 
-Published on **npm** as `dsh-session-toolkit` (v0.1.3, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and READMEs.
+Published on **npm** as `dsh-session-toolkit` (v0.1.3 (example; ensure the version matches package.json before publishing), MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and READMEs.
 
 - **npm**: consumers run `dsh plugin --profile <name> add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
 - **GitHub**: `dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit`.

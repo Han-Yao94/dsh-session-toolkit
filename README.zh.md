@@ -77,12 +77,12 @@ DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
-| `identity.maxText` | 8000 | 身份文本截断上限（字符，token 守卫）。 |
+| `identity.maxText` | 8000 | 身份文本截断上限（字符，token 守卫）。UI 软上限为 `client.identityCharLimit`（4000，编辑区限制），**host 硬截断**为本值（8000）。 |
 | `identity.sectionOrder` | 40 | 身份段在系统提示词中的顺序。**迁移**：显式固定 `identity.sectionOrder: 55` 的用户需改为 40 以保持「身份 → 全局 → 工作区」顺序。 |
 | `globalPrompt.sectionOrder` | 50 | 全局提示词段的顺序。 |
 | `globalPrompt.workspaceSectionOrder` | 60 | 工作区提示词段的顺序（置于最后）。 |
 | `autoResume.concurrency` | 3 | 启动恢复的最大在途 resume 数。 |
-| `webRestart.scriptPath` | 推导 | 重启脚本路径；缺省 `<DSH_HOME>/autostart/dsh-web-restart.cmd`（经 dsh-home-paths）。 |
+| `webRestart.scriptPath` | 推导 | 重启脚本路径；缺省 `<DSH_HOME>/autostart/dsh-web-restart.cmd`（经 dsh-home-paths）。设为**空字符串**则在运行时由 dsh-home-paths 推导，无需显式配置。 |
 | `webRestart.spawnDelayMs` | 500 | 202 缓冲后 spawn 重启脚本的延迟。 |
 | `client.identityCharLimit` | 4000 | 身份编辑区字符上限（UI 软上限）。 |
 | `client.restartTimeoutMs` | 90000 | 重启覆盖层超时（之后提示手动刷新）。 |
@@ -117,7 +117,7 @@ dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
 
 ### 分享与安装
 
-已发布至 **npm**（`dsh-session-toolkit`，v0.1.3，MIT）并同步至 **GitHub**（`github.com/Han-Yao94/dsh-session-toolkit`）。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+已发布至 **npm**（`dsh-session-toolkit`，v0.1.3（示例，发布前请与 package.json 版本号核对一致），MIT）并同步至 **GitHub**（`github.com/Han-Yao94/dsh-session-toolkit`）。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
 
 - **npm**：消费者 `dsh plugin --profile <name> add dsh-session-toolkit` 安装；新版本通过 `npm publish`（或 `pnpm publish`）发布。
 - **GitHub**：`dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit`。

@@ -959,7 +959,7 @@ collect('identity', apply);
       var rec = (ws[path] && typeof ws[path] === 'object') ? { ...ws[path] } : { enabled: false, content: '', files: [] };
       rec.files = newFiles;
       ws[path] = rec;
-      Promise.resolve(wsScope.set('workspaces', ws)).catch(function () {});
+      Promise.resolve(wsScope.set('workspaces', ws)).catch(function (e) { console.warn('[dsh-global-prompt] workspace projection update failed', e); });
     }
 
     useEffect(function () {
@@ -1140,7 +1140,7 @@ collect('identity', apply);
     var fileSnap = fsStatusScope ? fsStatusScope.getSnapshot() : null;
     var fileVal = (fileSnap && fileSnap.value && typeof fileSnap.value === 'object') ? fileSnap.value : {};
     var gFileStatus = (fileVal.byScope && Array.isArray(fileVal.byScope.global)) ? fileVal.byScope.global : [];
-    function onFilesChange(newFiles) { setGFiles(newFiles); Promise.resolve(scope.set('files', newFiles)).catch(function () {}); }
+    function onFilesChange(newFiles) { setGFiles(newFiles); Promise.resolve(scope.set('files', newFiles)).catch(function (e) { console.warn('[dsh-global-prompt] files update failed', e); }); }
     var gAutoTimerRef = useRef(null);
     var autoSaveState = useState(null);
     var gAutoSave = autoSaveState[0], setGAutoSave = autoSaveState[1];
@@ -1317,7 +1317,7 @@ collect('identity', apply);
                   }).then(function () {
                     gLastSavedRef.current = { enabled: false, content: '' };
                     setGAutoSave('saved');
-                  }).catch(function () {});
+                  }).catch(function (e) { console.warn('[dsh-global-prompt] reset settings failed', e); });
                 } }, t('reset'))),
               gToast ? React.createElement(Toast, { toast: gToast, t: t }) : null)
           : React.createElement('div', { className: 'dsw-workspace' },
@@ -1427,7 +1427,7 @@ collect('identity', apply);
     '.dsw-files-add{display:flex;gap:8px}',
     '.dsw-file-input{flex:1;min-width:0;height:30px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:13px}',
     '.dsw-file-input::placeholder{color:var(--dsw-alias-label-secondary)}',
-    '.dsw-file-input:focus{outline:none;border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 3px var(--dsw-alias-state-business-primary)}',
+    '.dsw-file-input:focus{outline:none;border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 3px var(--dsw-alias-state-business-primary)}',
     '.dsw-toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:8px;padding:10px 20px;border-radius:8px;background:var(--dsw-bg-card);border:1px solid var(--dsw-border-l1);box-shadow:0 4px 16px rgba(0,0,0,.12);font-size:14px;font-family:var(--dsw-font-family);animation:dsw-toast-in .2s ease;transition:background .2s ease,border-color .2s ease}',
     '.dsw-toast.ok{color:var(--dsw-success-text)}',
     '.dsw-toast.err{color:var(--dsw-error)}',
@@ -1638,7 +1638,7 @@ collect('identity', apply);
       });
     }
 
-    var inject = ['slots', 'locale'];
+    var inject = ['slots', 'locale', 'timer'];
 
     function apply(ctx, cfg) {
       restartTimeoutMs = (cfg && typeof cfg.restartTimeoutMs === 'number') ? cfg.restartTimeoutMs : 90000;
@@ -1695,7 +1695,7 @@ collect('identity', apply);
       '.wr-timeout{margin-top:16px;display:flex;flex-direction:column;gap:12px;align-items:center;font-size:13px;color:var(--dsw-alias-state-error-primary)}',
       '.wr-refresh{height:32px;padding:0 16px;border:none;border-radius:8px;background:var(--dsw-alias-button-primary-fill);color:#fff;cursor:pointer;font-family:inherit;font-size:13px;font-weight:500}',
       '.wr-refresh:hover{background:var(--dsw-alias-button-primary-hover)}',
-      '@media (prefers-color-scheme:dark){.wr-mask{background:rgba(0,0,0,.6)}}',
+      'body[data-ds-dark-theme] .wr-mask{background:rgba(0,0,0,.6)}',
     ].join('\n');
 
 collect('web-restart', apply);
@@ -1859,11 +1859,14 @@ collect('log-reposition', apply);
     let react = require('react');
     let react_jsx_runtime = require('react/jsx-runtime');
     let primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+    var NS = 'peer-message-ui';
+    var zh = { copied: '已复制', copy: '复制会话 ID' };
+    var en = { copied: 'Copied', copy: 'Copy session ID' };
     // 复制反馈时长可调参数（Config client.copyFeedbackMs，apply 时赋值）
     let copyFeedbackMs = 1600;
 
     /** Header action: copy this session's id to the clipboard, with a brief check mark feedback. */
-    function CopySessionIdAction({ sessionId, ctx }) {
+    function CopySessionIdAction({ sessionId, ctx, t }) {
       const [copied, setCopied] = react.useState(false);
       const timerRef = react.useRef(null);
       const onClick = () => {
@@ -1882,8 +1885,8 @@ collect('log-reposition', apply);
       return react_jsx_runtime.jsx('button', {
         type: 'button',
         onClick,
-        title: copied ? '已复制' : '复制会话 ID',
-        'aria-label': copied ? '已复制' : '复制会话 ID',
+        title: copied ? t('copied') : t('copy'),
+        'aria-label': copied ? t('copied') : t('copy'),
         style: {
           display: 'inline-flex',
           alignItems: 'center',
@@ -1903,15 +1906,21 @@ collect('log-reposition', apply);
       });
     }
 
-    const inject = ['slots'];
+    const inject = ['slots', 'timer'];
 
     function apply(ctx, cfg) {
       copyFeedbackMs = (cfg && typeof cfg.copyFeedbackMs === 'number') ? cfg.copyFeedbackMs : 1600;
+      var locale = ctx.get('locale');
+      var t = function (k) { return zh[k] || k; };
+      if (locale) {
+        ctx.effect(function () { return locale.register(NS, { zh: zh, en: en }); }, 'dsh-peer-message: locale');
+        t = locale.bind(NS);
+      }
       ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
         name: 'conversation.session.header.actions',
         id: 'copy-session-id',
         order: 30
-      }, function (props) { return react_jsx_runtime.jsx(CopySessionIdAction, { sessionId: props.sessionId, ctx: ctx }); }));
+      }, function (props) { return react_jsx_runtime.jsx(CopySessionIdAction, { sessionId: props.sessionId, ctx: ctx, t: t }); }));
 
       // 工具行入口（方案 A：空白会话可见性）：与 header.actions 并存，复用同一组件
       // order 30 先于身份按钮（40），与 header.actions 的 30/40 显式区分保持一致
@@ -1919,7 +1928,7 @@ collect('log-reposition', apply);
         name: 'conversation.input.left',
         id: 'copy-session-id-input',
         order: 30
-      }, function (props) { return react_jsx_runtime.jsx(CopySessionIdAction, { sessionId: props.sessionId, ctx: ctx }); }));
+      }, function (props) { return react_jsx_runtime.jsx(CopySessionIdAction, { sessionId: props.sessionId, ctx: ctx, t: t }); }));
     }
 
 collect('peer-message', apply);
