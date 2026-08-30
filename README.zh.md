@@ -138,30 +138,30 @@ Schema 校验、`applies: live`、持久化于 `settings.yaml`:
 
 ```powershell
 # 来自 npm
-dsh plugin --profile <name> add dsh-session-toolkit
+dsh plugin --profile web add dsh-session-toolkit
 
 # 来自 GitHub
-dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit
+dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit
 
 # 来自本地 checkout / tarball
-dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
+dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 ```
 
 包的 `dsh.bundle.patch`(`cordis.patch.yml`)将单一入口(`id: session-toolkit`,`name: 'dsh-session-toolkit'`)注册为 **bundle 层**——在 `dsh-base` / `dsh-web-app` 之后、profile patch 层之前应用(层序:bundles 依次 → profile patch → home patch → `--patch` 覆盖)。
 
-卸载:`dsh plugin --profile <name> remove dsh-session-toolkit`。
+卸载:`dsh plugin --profile web remove dsh-session-toolkit`。
 
 ### 本地开发
 
-迭代源码时可安装 checkout(`dsh plugin --profile <name> add <源码路径>`,使用 pnpm `link:` 依赖),或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
+迭代源码时可安装 checkout(`dsh plugin --profile web add <源码路径>`,使用 pnpm `link:` 依赖),或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
 
 ### 分享与安装
 
 已发布至 **npm**(`dsh-session-toolkit`,v0.1.4,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
 
-- **npm**:消费者 `dsh plugin --profile <name> add dsh-session-toolkit` 安装;新版本通过 `npm publish`(或 `pnpm publish`)发布。
-- **GitHub**:`dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit`。
-- **tarball**:`pnpm pack` → `dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz`。
+- **npm**:消费者 `dsh plugin --profile web add dsh-session-toolkit` 安装;新版本通过 `npm publish`(或 `pnpm publish`)发布。
+- **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
+- **tarball**:`pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`。
 
 运行时依赖(`@deepseek-ai/schemastery`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`)声明在 `dependencies`,随安装自动拉取;平台模块(`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-slots`、`@deepseek-ai/dsh-client-ui-primitives`)为 `peerDependencies`,由 DSH 宿主提供。peer 与依赖均锁定到 `0.1.2-alpha.1` 以匹配 `dsh-v0.1.2-alpha.1`。已验证:打包 tgz 的干净安装可完整解析所有 import(不依赖本地 junction)。
 
@@ -218,4 +218,4 @@ dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
 
 ## 恢复方法
 
-卸载 bundle:`dsh plugin --profile <name> remove dsh-session-toolkit`,然后重启 GUI。要回退到整合前的布局,请重新启用原插件而非安装本包。
+卸载 bundle:`dsh plugin --profile web remove dsh-session-toolkit`,然后重启 GUI。要回退到整合前的布局,请重新启用原插件而非安装本包。

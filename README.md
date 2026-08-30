@@ -138,30 +138,30 @@ Install into any profile (bundle layer; single source, no copies):
 
 ```powershell
 # from npm
-dsh plugin --profile <name> add dsh-session-toolkit
+dsh plugin --profile web add dsh-session-toolkit
 
 # from GitHub
-dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit
+dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit
 
 # from a local checkout / tarball
-dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz
+dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 ```
 
 The package's `dsh.bundle.patch` (`cordis.patch.yml`) registers the single entry (`id: session-toolkit`, `name: 'dsh-session-toolkit'`) as a **bundle layer** — applied after `dsh-base` / `dsh-web-app` and before the profile patch layer (layer order: bundles in sequence → profile patch → home patch → `--patch` overlay).
 
-Uninstall: `dsh plugin --profile <name> remove dsh-session-toolkit`.
+Uninstall: `dsh plugin --profile web remove dsh-session-toolkit`.
 
 ### Local development
 
-To iterate on the source without publishing, install the checkout directly (`dsh plugin --profile <name> add <path-to-checkout>`, which uses a pnpm `link:` dependency), or use a manual junction into the profile's `node_modules` plus an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer `dsh plugin add`.
+To iterate on the source without publishing, install the checkout directly (`dsh plugin --profile web add <path-to-checkout>`, which uses a pnpm `link:` dependency), or use a manual junction into the profile's `node_modules` plus an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer `dsh plugin add`.
 
 ### Share & Install
 
 Published on **npm** as `dsh-session-toolkit` (v0.1.4, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
 
-- **npm**: consumers run `dsh plugin --profile <name> add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
-- **GitHub**: `dsh plugin --profile <name> add github:Han-Yao94/dsh-session-toolkit`.
-- **Tarball**: `pnpm pack` → `dsh plugin --profile <name> add ./dsh-session-toolkit-<version>.tgz`.
+- **npm**: consumers run `dsh plugin --profile web add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
+- **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.
+- **Tarball**: `pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`.
 
 Runtime dependencies (`@deepseek-ai/schemastery`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-home-paths`) are declared in `dependencies` and install automatically; platform modules (`react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-locale`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-slots`, `@deepseek-ai/dsh-client-ui-primitives`) are `peerDependencies` provided by the DSH host. Peers and dependencies are pinned to the `0.1.2-alpha.1` line to match `dsh-v0.1.2-alpha.1`. Verified: a clean install of the packed tarball resolves all imports without any local junction.
 
@@ -218,4 +218,4 @@ Each section's rendered text is a fixed part of the request prefix while its set
 
 ## Recovery
 
-Uninstall the bundle: `dsh plugin --profile <name> remove dsh-session-toolkit`, then restart the GUI. To roll back to the pre-consolidation layout, re-enable the original plugins instead of installing this package.
+Uninstall the bundle: `dsh plugin --profile web remove dsh-session-toolkit`, then restart the GUI. To roll back to the pre-consolidation layout, re-enable the original plugins instead of installing this package.
