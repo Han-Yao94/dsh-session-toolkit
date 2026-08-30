@@ -1707,7 +1707,7 @@ collect('web-restart', apply);
     var exports = module.exports;
     var react_jsx_runtime = require('react/jsx-runtime');
     var primitives = require('@deepseek-ai/dsh-client-ui-primitives');
-    var runtime_client = require('@deepseek-ai/dsh-client-runtime/client');
+    var runtime_client = require('@deepseek-ai/dsh-client-store');
 
     // 独立 NS：复制官方 dialog 文案，避免与官方 NS 'session-log-download' 重复注册冲突
     var NS = 'session-log-reposition';
