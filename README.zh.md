@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Web 重启服务、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装。
+DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Web 重启服务、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
 
 当前版本:**0.1.4**,适配 **DeepSeek Harness `dsh-v0.1.2-alpha.1`**。
 
@@ -34,6 +34,9 @@ General 设置中的「重启服务」入口(`settings.general.item`,id `web-res
 ### 会话间消息(Peer Messaging)
 host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区路径寻址会话、wakeup 投递),并在 `conversation.session.header.actions`(id `copy-session-id`,order 30)与 `conversation.input.left`(id `copy-session-id-input`,order 30)各加「复制会话 ID」按钮。发出消息内容在投递前经 `toPlainText` 转为纯文本,接收方看到整洁文本而非原始 markdown。
 
+### 提示词去重(Prompt Dedup)
+对 **身份 / 全局 / 工作区** 三段系统提示词(段 `session-identity`、`global-prompt`、`workspace-prompt`,order 40/50/60)做**跨段行级去重**。`promptDedup.enabled` 默认开启(仅显式设为 false 时禁用)。按 `\n` 切分,三段内出现过的**完全相同原行**只保留"先出现"那一份(全局 `seen` 贯穿三段,同段内部自重复也收敛),后出现段的重复行被去掉;任何段独有内容一律保留。不解析 `{{name}}` 占位符(单行完整组,按行切分不会切断)、不破坏 markdown、不设 complete,绝不动 harness 自带段(`harness:identity` / `deployment:persona` / 工具段)。机制:在插件根 ctx 订阅 `system-prompt/assemble` waterfall,`await next()` 后对返回结果的 `sections` 做去重再返回。
+
 ---
 
 ## 兼容性
@@ -51,7 +54,7 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 
 ## 架构
 
-- **Host 半** —— `lib/index.js` 组装六个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`web-restart.js`、`peer-message.js`、`log-reposition.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `global-prompt`、`workspace-prompt`、`workspace-registry-active`、`prompt-file-status` 命名空间、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读),以及工作区/活跃工作流投影(`agents.roots()` → 活跃工作区)。
+- **Host 半** —— `lib/index.js` 组装七个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`web-restart.js`、`peer-message.js`、`log-reposition.js`、`prompt-dedup.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `global-prompt`、`workspace-prompt`、`workspace-registry-active`、`prompt-file-status` 命名空间、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读),以及工作区/活跃工作流投影(`agents.roots()` → 活跃工作区)。
 - **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;五个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件,经绑定的 `prompt-file-status` scope 显示每文件状态)。
 
 ### 注册的 Slots
@@ -103,6 +106,8 @@ Schema 校验、`applies: live`、持久化于 `settings.yaml`:
     webRestart:
       scriptPath: ''          # 可选;缺省推导为 <DSH_HOME>/autostart/dsh-web-restart.cmd
       spawnDelayMs: 500
+    promptDedup:
+      enabled: true           # 三段(身份/全局/工作区)跨段行级去重开关;默认 true = 开启(仅显式设为 false 时禁用)
     client:
       identityCharLimit: 4000
       restartTimeoutMs: 90000
@@ -122,6 +127,7 @@ Schema 校验、`applies: live`、持久化于 `settings.yaml`:
 | `autoResume.concurrency` | 3 | 启动恢复的最大在途 resume 数。 |
 | `webRestart.scriptPath` | 推导 | 重启脚本路径;缺省 `<DSH_HOME>/autostart/dsh-web-restart.cmd`(经 dsh-home-paths)。设为**空字符串**则在运行时由 dsh-home-paths 推导,无需显式配置。 |
 | `webRestart.spawnDelayMs` | 500 | 202 缓冲后 spawn 重启脚本的延迟。 |
+| `promptDedup.enabled` | true | 三段(身份/全局/工作区)系统提示词跨段行级去重开关(默认开启,仅显式设为 false 时禁用)。开启时,三段中出现过的**完全相同原行**只保留"先出现"一份(全局 seen 贯穿三段),后出现段的重复行被去掉;任何段独有内容一律保留。不解析 `{{name}}` 占位符、不破坏 markdown、不设 complete,绝不动 harness 自带段。 |
 | `client.identityCharLimit` | 4000 | 身份编辑区字符上限(UI 软上限)。 |
 | `client.restartTimeoutMs` | 90000 | 重启覆盖层超时(之后提示手动刷新)。 |
 | `client.restartPollMs` | 1000 | 重启健康轮询间隔。 |

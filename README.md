@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A consolidated plugin toolkit for the **DeepSeek Harness**. Six previously separate local plugins — **session identity**, **global prompt**, **session auto-resume**, **web restart service**, **Session-log button relocation**, and **peer-session messaging** — merged into a single installable package that ships in the official bundle form (`dsh.bundle.patch`) and installs with `dsh plugin add`.
+A consolidated plugin toolkit for the **DeepSeek Harness**. Six previously separate local plugins — **session identity**, **global prompt**, **session auto-resume**, **web restart service**, **Session-log button relocation**, and **peer-session messaging** — merged into a single installable package that ships in the official bundle form (`dsh.bundle.patch`) and installs with `dsh plugin add`; it also includes a **Prompt Dedup** feature.
 
 Current version: **0.1.4**, adapted to **DeepSeek Harness `dsh-v0.1.2-alpha.1`**.
 
@@ -34,6 +34,9 @@ Shadows the official download button in `conversation.session.header.utilities` 
 ### Peer Messaging
 `send_to_session` / `list_sessions` tools on the host plane (session addressing by id or workspace path, wakeup delivery) plus a "copy session ID" button in both `conversation.session.header.actions` (id `copy-session-id`, order 30) and `conversation.input.left` (id `copy-session-id-input`, order 30). Outgoing message content is converted to plain text (`toPlainText`) before delivery so recipients see tidy text rather than raw markdown.
 
+### Prompt Dedup
+Performs **cross-section line-level deduplication** across the identity / global / workspace system-prompt sections (`session-identity`, `global-prompt`, `workspace-prompt`, orders 40/50/60). `promptDedup.enabled` is on by default (disable only by setting it to `false`). Splits each section on `\n` and keeps only the **first occurrence** of each identical original line (a single `seen` set spans all three sections, so intra-section self-duplicates also collapse); duplicate lines in later sections are dropped. Every section's unique content is preserved. It does not parse `{{name}}` placeholders (single-line complete groups, never split by line), does not break markdown, never sets `complete`, and never touches harness-owned sections (`harness:identity` / `deployment:persona` / tool sections). Mechanism: subscribe to the `system-prompt/assemble` waterfall on the plugin's root ctx, `await next()`, then deduplicate `sections` on the returned result before returning it.
+
 ---
 
 ## Compatibility
@@ -51,7 +54,7 @@ The plugin's **host-side** `Config` validates the entire configuration tree — 
 
 ## Architecture
 
-- **Host half** — `lib/index.js` composes six feature modules (`identity.js`, `global-prompt.js`, `auto-resume.js`, `web-restart.js`, `peer-message.js`, `log-reposition.js`). `inject` is the deduplicated union of module dependencies; each module's `apply` runs inside a `safe()` guard so one failing module never takes the whole package down. Every contribution is lifecycle-bound (`ctx.effect` for prompt sections and HTTP routes, plugin-fiber registrations for tools; timers go through the `timer` service). `global-prompt.js` owns the `global-prompt`, `workspace-prompt`, `workspace-registry-active`, and `prompt-file-status` namespaces, the `readPromptFiles` helper (live `fs.readFileSync` re-read), and the workspace/live-workflow projection (`agents.roots()` → active workspaces).
+- **Host half** — `lib/index.js` composes seven feature modules (`identity.js`, `global-prompt.js`, `auto-resume.js`, `web-restart.js`, `peer-message.js`, `log-reposition.js`, `prompt-dedup.js`). `inject` is the deduplicated union of module dependencies; each module's `apply` runs inside a `safe()` guard so one failing module never takes the whole package down. Every contribution is lifecycle-bound (`ctx.effect` for prompt sections and HTTP routes, plugin-fiber registrations for tools; timers go through the `timer` service). `global-prompt.js` owns the `global-prompt`, `workspace-prompt`, `workspace-registry-active`, and `prompt-file-status` namespaces, the `readPromptFiles` helper (live `fs.readFileSync` re-read), and the workspace/live-workflow projection (`agents.roots()` → active workspaces).
 - **Client half** — `client/client.js` is a single `window.__ModuleLoader__.load` bundle; the five UI modules live in IIFEs and are collected into one `apply` that registers all slots in order (guarded per module). All UI uses `React.createElement`; styles are injected as `data-plugin` style tags with theme CSS variables and dark-mode coverage; no global DOM manipulation. The global-prompt module renders the **Tabs (Global / Per workspace)** page plus a reusable `FileRefsPanel` (add/remove referenced files, per-file status via the bound `prompt-file-status` scope).
 
 ### Registered slots
@@ -103,6 +106,8 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
     webRestart:
       scriptPath: ''          # optional; default derived as <DSH_HOME>/autostart/dsh-web-restart.cmd
       spawnDelayMs: 500
+    promptDedup:
+      enabled: true           # cross-section line-level dedup across identity/global/workspace; default true (disable only by setting false)
     client:
       identityCharLimit: 4000
       restartTimeoutMs: 90000
@@ -122,6 +127,7 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 | `autoResume.concurrency` | 3 | Max in-flight resumes during startup restore. |
 | `webRestart.scriptPath` | derived | Restart script path; default `<DSH_HOME>/autostart/dsh-web-restart.cmd` via dsh-home-paths. Setting it to an **empty string** derives it at runtime via dsh-home-paths (no explicit config needed). |
 | `webRestart.spawnDelayMs` | 500 | Delay before spawning the restart script (202 buffer). |
+| `promptDedup.enabled` | true | Cross-section line-level deduplication across the identity/global/workspace system-prompt sections (on by default; disable only by setting it to `false`). When on, each **identical original line** across the three sections keeps only its "first occurrence" (a single `seen` set spans all three); duplicate lines in later sections are dropped. Every section's unique content is preserved. It does not parse `{{name}}` placeholders, does not break markdown, never sets `complete`, and never touches harness-owned sections. |
 | `client.identityCharLimit` | 4000 | Identity editor character limit (UI soft limit). |
 | `client.restartTimeoutMs` | 90000 | Restart overlay timeout before the manual-refresh hint. |
 | `client.restartPollMs` | 1000 | Restart health-poll interval. |
