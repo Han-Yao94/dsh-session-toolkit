@@ -4,7 +4,7 @@
 
 A consolidated plugin toolkit for the **DeepSeek Harness**. Six previously separate local plugins — **session identity**, **global prompt**, **session auto-resume**, **web restart service**, **Session-log button relocation**, and **peer-session messaging** — merged into a single installable package that ships in the official bundle form (`dsh.bundle.patch`) and installs with `dsh plugin add`; it also includes a **Prompt Dedup** feature.
 
-Current version: **0.1.4**, adapted to **DeepSeek Harness `dsh-v0.1.2-alpha.1`**.
+Current version: **0.1.7**, adapted to **DeepSeek Harness `dsh-v0.1.2-alpha.1`**.
 
 ---
 
@@ -163,7 +163,7 @@ To iterate on the source without publishing, install the checkout directly (`dsh
 
 ### Share & Install
 
-Published on **npm** as `dsh-session-toolkit` (v0.1.4, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
+Published on **npm** as `dsh-session-toolkit` (v0.1.7, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
 
 - **npm**: consumers run `dsh plugin --profile web add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
 - **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.

@@ -4,7 +4,7 @@
 
 DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Web 重启服务、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
 
-当前版本:**0.1.4**,适配 **DeepSeek Harness `dsh-v0.1.2-alpha.1`**。
+当前版本:**0.1.7**,适配 **DeepSeek Harness `dsh-v0.1.2-alpha.1`**。
 
 ---
 
@@ -163,7 +163,7 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 
 ### 分享与安装
 
-已发布至 **npm**(`dsh-session-toolkit`,v0.1.4,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+已发布至 **npm**(`dsh-session-toolkit`,v0.1.7,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
 
 - **npm**:消费者 `dsh plugin --profile web add dsh-session-toolkit` 安装;新版本通过 `npm publish`(或 `pnpm publish`)发布。
 - **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
