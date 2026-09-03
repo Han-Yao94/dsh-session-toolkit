@@ -1376,7 +1376,7 @@ collect('identity', apply);
 
   var CSS = [
     '.dsw-page{--dsw-bg-page:var(--dsw-alias-bg-base);--dsw-bg-card:var(--dsw-alias-bg-layer-1);--dsw-border-l1:var(--dsw-alias-border-l1);--dsw-border-l2:var(--dsw-alias-border-l2);--dsw-text-title:var(--dsw-alias-label-primary);--dsw-text-body:var(--dsw-alias-label-secondary);--dsw-text-sub:var(--dsw-alias-label-tertiary);--dsw-success-text:var(--dsw-alias-state-success-primary);--dsw-warn:var(--dsw-alias-state-warn-label);--dsw-error:var(--dsw-alias-state-error-primary);background:var(--dsw-bg-page);min-height:100%;padding:32px 24px;box-sizing:border-box;font-family:var(--dsw-font-family);color:var(--dsw-text-title);font-size:14px;line-height:1.6;transition:background .2s ease,color .2s ease}',
-    '.dsw-card{max-width:720px;margin:0 auto;background:var(--dsw-bg-card);border:1px solid var(--dsw-border-l1);border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.04);padding:24px 28px;display:flex;flex-direction:column;box-sizing:border-box;transition:background .2s ease,border-color .2s ease,box-shadow .2s ease}',
+    '.dsw-card{width:100%;background:var(--dsw-bg-card);border:1px solid var(--dsw-border-l1);border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.04);padding:24px 28px;display:flex;flex-direction:column;box-sizing:border-box;transition:background .2s ease,border-color .2s ease,box-shadow .2s ease}',
     '.dsw-head{display:flex;flex-direction:column}',
     '.dsw-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
     '.dsw-title-group{display:flex;align-items:center;gap:8px;min-width:0}',
