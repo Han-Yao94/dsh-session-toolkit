@@ -1,33 +1,127 @@
-# This workflow will run tests using node and then publish a package to GitHub Packages when a release is created
-# For more information see: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
-
-name: Node.js Package
+# 验证 + 发布。原来的版本跑 `npm ci`（本仓库只有 pnpm-lock.yaml，无 package-lock.json）
+# 与 `npm test`（package.json 里根本没有 test 脚本），因此一旦创建 release 必然失败。
+# 现在：验证门 = `node scripts/verify.mjs`（零依赖，只用 node 标准库 + npm，无需 install）。
+name: Verify and publish
 
 on:
+  push:
+    # 本地与远端默认分支均为 master，不存在 main。双列以防将来改名（改名风险双向）。
+    branches: [master, main]
+  pull_request:
   release:
     types: [created]
+  workflow_dispatch:
+
+concurrency:
+  group: verify-publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm ci
-      - run: npm test
+      # 本包无构建步骤、verify.mjs 只用 node 标准库与自带 npm，故不装依赖。
+      - run: node scripts/verify.mjs
+
+  selftest:
+    # 负向自测：证明 verify.mjs 的每条断言都还能报红（不会失败的检查等于没有检查）。
+    # 全部破坏在 os.tmpdir() 的副本上进行，脚本内另有工作区内容对拍护栏。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/verify.selftest.mjs
+      # tag 守卫的本机无法验证项：从上面 publish-npm 的工件里**抽取**真正的 case 块来执行，
+      # 而不是在测试里重写一份逻辑（重写就等于测自己）。ubuntu-latest 自带 bash；
+      # 开发者本机若无 POSIX shell，这一步只在 CI 上提供证据。
+      - name: Tag guard matrix (accept / reject)
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          export VERSION
+          awk '/case "\$TAG" in/{f=1} f{print} f&&/esac/{exit}' .github/workflows/npm-publish.yml > "$RUNNER_TEMP/tagcheck.sh"
+          test -s "$RUNNER_TEMP/tagcheck.sh"
+          grep -q 'esac' "$RUNNER_TEMP/tagcheck.sh"
+          echo "--- 抽取到的守卫 ---"; cat "$RUNNER_TEMP/tagcheck.sh"
+          for t in "v$VERSION" "$VERSION" "release-$VERSION"; do
+            if ! TAG="$t" bash "$RUNNER_TEMP/tagcheck.sh" >/dev/null 2>&1; then
+              echo "::error::tag '$t' 应被接受却被拒"; exit 1
+            fi
+          done
+          for t in "v$VERSION"0 "v1$VERSION" "v$VERSION-rc1" ""; do
+            if TAG="$t" bash "$RUNNER_TEMP/tagcheck.sh" >/dev/null 2>&1; then
+              echo "::error::tag '$t' 应被拒绝却被接受"; exit 1
+            fi
+          done
+          echo "tag 守卫矩阵通过：3 个应接受形态被接受，4 个应拒绝形态被拒绝"
+
+  auto-resume-contract:
+    # 启动恢复契约门：两种 list() 形状（快照 / 裸 header）下都选对目标，
+    # 未识别形状必须留下可诊断告警。全部副本与破坏在 os.tmpdir()，脚本内自带工作区内容对拍护栏。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # 本门用 git cat-file HEAD:lib/auto-resume.js 取旧版本作负向对照；
+      # actions/checkout 默认 fetch-depth: 1 已含 HEAD 的 blob，无需改动。
+      - run: node scripts/auto-resume.contract.selftest.mjs
+
+  anchor-contract:
+    # §0 内容锚门：重算 docs/agents/integration-contracts.md §0 的 12 条锚。
+    # 被引文件（lib/**、client/client.js、README.zh.md、package.json、cordis.patch.yml）一旦变动即红——
+    # 这是刻意摩擦：重落锚是 Tech Lead 的动作（契约表 §D.6），门只负责把"静默失效"变响。
+    # 判据只有哈希；不校验行号（off-by-N 属已知不可机检类）。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/anchor.contract.selftest.mjs
 
   publish-npm:
-    needs: build
+    # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
+    # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
+    needs: [verify, selftest, auto-resume-contract, anchor-contract]
+    # 只有释放事件才发布；push / PR / 手动触发只跑验证门。
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
-      - run: npm ci
+      # 防止「release 的 tag 与包版本不一致」导致发错版本。
+      # 显式枚举且逐字匹配：接受 v0.1.7 / 0.1.7 / release-0.1.7，拒绝 v0.1.70、v10.1.7、v0.1.7-rc1。
+      # tag 经 env 中转而非内插进脚本，避免 tag 文本成为 shell 注入面。
+      - name: Check release tag matches package version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          case "$TAG" in
+            "v$VERSION"|"$VERSION"|"release-$VERSION") echo "tag $TAG 与版本 $VERSION 一致" ;;
+            *) echo "::error::release tag '$TAG' 与 package.json 版本 '$VERSION' 不一致——请用 v$VERSION 重新打 tag"; exit 1 ;;
+          esac
       - run: npm publish
         env:
-          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
+          NODE_AUTH_TOKEN: ${{ secrets.npm_token }}

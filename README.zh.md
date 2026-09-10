@@ -161,6 +161,15 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 
 迭代源码时可安装 checkout(`dsh plugin --profile web add <源码路径>`,使用 pnpm `link:` 依赖),或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
 
+验证门(仅限源码 checkout 内运行——`scripts/` 不随发布包分发;无需构建步骤,也无需安装依赖):
+
+```powershell
+pnpm check    # 语法门 —— 对全部随包 JS 跑 node --check
+pnpm verify   # 另加打包契约 —— 入口可达、import 声明完整、双语 README 版本一致
+```
+
+`pnpm verify` 断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。升级 harness 时使用的 DSH 集成点清单见 `docs/agents/integration-contracts.md`。
+
 ### 分享与安装
 
 已发布至 **npm**(`dsh-session-toolkit`,v0.1.7,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。

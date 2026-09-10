@@ -1,0 +1,367 @@
+#!/usr/bin/env node
+/**
+ * auto-resume 启动恢复的**契约门**（可重复执行、能报红、可被证伪）。
+ *
+ * 守的是什么：`lib/auto-resume.js` 的启动恢复必须能在**两种 list() 契约**下都选对目标——
+ *   · 快照形状（0.1.5 现行）：`list()` → `SessionPersistenceSnapshot[]`，header 在 `.header`
+ *     （`@deepseek-ai/dsh-session-persistence/lib/types/index.d.ts:22-31,155`）；
+ *   · 裸 header 形状（0.1.2 一线）：列表项本身即 header。
+ * 2026-09-10 的真实故障形态：只认裸 header 的代码遇到快照形状 → `h.id` 为 undefined →
+ * 目标集恒空 → **静默无动作、无任何报错**。本门把这种"静默失效"变成会红的断言。
+ *
+ * 做法（不依赖真实 ~/.dsh/sessions）：把被测代码在 os.tmpdir() 里实例化，喂**合成**的
+ * persistence 后端，观察它实际调用了哪些 `agents.resume`。
+ *
+ * 退出码契约（沿用 verify.mjs 口径）：
+ *   0  = 全部契约断言成立，且两个灵敏度对照复现
+ *   1  = 有断言失败（含把 `--code` 指向已知坏代码时的预期红）
+ *   3  = 前置条件不成立（取不到 HEAD blob / 建不起 node_modules 链接 / 被测模块导入失败）——**未完成验证**，不得读作通过
+ *   64 = 用法错误
+ *
+ * 用法：
+ *   node scripts/auto-resume.contract.selftest.mjs                 # 测工作区 lib/auto-resume.js
+ *   node scripts/auto-resume.contract.selftest.mjs --code <file>   # 测指定副本（旧 blob / 变异体）
+ * 不进 pnpm verify（保持快门快）；CI 中由 npm-publish.yml 的独立 job 直调本文件。
+ *
+ * 护栏（同 verify.selftest.mjs 的立场）：
+ *   · 一切副本、日志、破坏只在 os.tmpdir() 内；工作区零写入，跑前跑后做内容 SHA256 对拍。
+ *   · 写路径必须与工作区根**双向无前缀包含**，且先判路径后落盘。
+ *   · 子进程一律用文件描述符承接输出（本沙箱禁管道 stdio，会 EPERM）；stdout/stderr 分开落盘。
+ *
+ * 已知未覆盖（明列，不沉默）：
+ *   1. cordis 真实的 `ctx.inject` 时序（服务晚到 / 永不到）——本门用同一个 ctx 直接回调，不测调度。
+ *   2. 真实持久化后端与真实 ~/.dsh/sessions（本门全部用合成后端；真实后端属 L3）。
+ *   3. `scope.watch` 的「false→true 立即恢复」路径——本门只覆盖启动恢复。
+ *   4. 并发上限 CONCURRENCY 的真实调度语义（本门只断言最终选中集合，不断言批间顺序）。
+ *   5. Host Dev 的 integration.mjs 是**观测脚本**（恒 exit 0），本门不采信其输出，也不复用它。
+ */
+
+import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import {
+  closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync,
+  rmSync, symlinkSync, writeFileSync,
+} from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const TMP_BASE = os.tmpdir()
+const EXIT = { PASS: 0, FAIL: 1, INCOMPLETE: 3, USAGE: 64 }
+
+// ------------------------------------------------------------------ 护栏 1
+function within(a, b) {
+  return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep)
+}
+
+function assertOutsideWorkspace(p, label) {
+  const abs = path.resolve(p)
+  if (!within(abs, TMP_BASE) || within(abs, ROOT) || within(ROOT, abs)) {
+    console.error(`护栏 1 触发：${label} → ${abs}`)
+    console.error('  必须在 os.tmpdir() 之下，且与工作区根之间不得存在前缀包含关系（双向）。拒绝继续。')
+    process.exit(EXIT.FAIL)
+  }
+}
+
+// ------------------------------------------------------------------ 护栏 2
+const IGNORE_DIRS = new Set(['.git', 'node_modules'])
+
+function manifest(dir) {
+  const out = new Map()
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) {
+        if (!IGNORE_DIRS.has(e.name)) walk(p)
+      } else if (e.isFile()) {
+        out.set(path.relative(dir, p).split(path.sep).join('/'),
+          createHash('sha256').update(readFileSync(p)).digest('hex'))
+      }
+    }
+  }
+  walk(dir)
+  return out
+}
+
+function manifestDiff(before, after) {
+  const diffs = []
+  for (const [k, v] of after) if (before.get(k) !== v) diffs.push(before.has(k) ? `内容变化: ${k}` : `新增: ${k}`)
+  for (const k of before.keys()) if (!after.has(k)) diffs.push(`删除: ${k}`)
+  return diffs
+}
+
+// ------------------------------------------------------------------ 工作区
+assertOutsideWorkspace(path.join(TMP_BASE, 'dsh-arv-contract-'), '自测工作目录模板')
+const WORK = mkdtempSync(path.join(TMP_BASE, 'dsh-arv-contract-'))
+assertOutsideWorkspace(WORK, '自测工作目录')
+
+const sha256 = (p) => createHash('sha256').update(readFileSync(p)).digest('hex').toUpperCase().slice(0, 16)
+
+/** 被测模块是 ESM，`import '@deepseek-ai/schemastery'` 需要能解析——在临时目录建工作区 node_modules 链接。 */
+function linkNodeModules() {
+  const link = path.join(WORK, 'node_modules')
+  const target = path.join(ROOT, 'node_modules')
+  if (!existsSync(target)) return false
+  try {
+    symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+    return existsSync(path.join(link, '@deepseek-ai', 'schemastery'))
+  } catch {
+    return false
+  }
+}
+
+/** 取 HEAD 里的旧版本（负向对照的真源，非转述）。 */
+function headBlob(rel) {
+  const outPath = path.join(WORK, 'head-blob.out')
+  const errPath = path.join(WORK, 'head-blob.err')
+  const outFd = openSync(outPath, 'w')
+  const errFd = openSync(errPath, 'w')
+  try {
+    const r = spawnSync('git', ['-C', ROOT, 'cat-file', 'blob', `HEAD:${rel}`],
+      { stdio: ['ignore', outFd, errFd], env: process.env })
+    if (r.status !== 0) return { ok: false, why: readFileSync(errPath, 'utf8').trim() || `git exit ${r.status}` }
+    return { ok: true, text: readFileSync(outPath, 'utf8') }
+  } finally {
+    closeSync(outFd)
+    closeSync(errFd)
+  }
+}
+
+function materialize(name, text) {
+  const dir = path.join(WORK, name)
+  assertOutsideWorkspace(dir, `副本 ${name}`)
+  mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, 'auto-resume.js')
+  writeFileSync(file, text)
+  return file
+}
+
+/**
+ * 把被测代码**原样复制**进临时区再加载：`--code` 可能指向任意目录，而 ESM 的裸导入
+ * 只沿被加载文件所在目录向上找 node_modules——只有落在 WORK 之下才解析得到 schemastery。
+ * 复制不改变被测字节（判据仍是"这份代码是否满足契约"）。
+ */
+function stageCode(srcPath) {
+  const dir = path.join(WORK, 'code-under-test')
+  assertOutsideWorkspace(dir, '被测代码副本')
+  mkdirSync(dir, { recursive: true })
+  const dest = path.join(dir, 'auto-resume.js')
+  copyFileSync(srcPath, dest)
+  return dest
+}
+
+// ------------------------------------------------------------------ 合成输入
+const ENABLED = {
+  's-legal': true, 's-subagent': true, 's-child': true, 's-depth': true, 's-off': false, 's-blank': true,
+}
+const HEADERS = [
+  { id: 's-legal' },
+  { id: 's-subagent', origin: 'subagent' },
+  { id: 's-child', parentSession: 'parent-1' },
+  { id: 's-depth', delegationDepth: 1 },
+  { id: 's-off' },
+  { id: 's-blank' },
+]
+const EVENT_COUNT = { 's-legal': 7, 's-blank': 0 }
+
+const BACKENDS = {
+  /** 0.1.5 现行：SessionPersistenceSnapshot[] */
+  snapshot: () => ({
+    async list() {
+      return HEADERS.map((header) => {
+        const snap = { header, revision: `rev-${header.id}` }
+        if (Object.prototype.hasOwnProperty.call(EVENT_COUNT, header.id)) snap.eventCount = EVENT_COUNT[header.id]
+        return snap
+      })
+    },
+  }),
+  /** 0.1.2 一线：SessionHeader[] */
+  bare: () => ({ async list() { return HEADERS.map((h) => ({ ...h })) } }),
+  /** 未识别形状：既不是快照也不是裸 header */
+  unrecognized: () => ({
+    async list() {
+      return [
+        { sessionId: 's-legal', meta: { cwd: '/x' } },
+        { header: 'not-an-object', revision: 1 },
+      ]
+    },
+  }),
+}
+
+// ------------------------------------------------------------------ 运行器
+function makeCtx(backend, log) {
+  const scope = {
+    get: () => ({ sessions: ENABLED }),
+    watch: () => () => {},
+    update: async () => {},
+    replace: async () => {},
+  }
+  const childCtx = { get: (name) => (name === 'sessionPersistence' ? backend : undefined) }
+  return {
+    settings: { register: () => scope },
+    get: (name) => {
+      if (name === 'sessionPersistence') return backend // 旧代码在 apply 时刻一次性取值
+      if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'p', model: 'm' }) }
+      return undefined
+    },
+    // 新代码用 ctx.inject 等服务就绪；这里同步回调，模拟"服务已在"
+    inject: (names, cb) => { if (names.includes('sessionPersistence')) cb(childCtx) },
+    agents: {
+      get: () => undefined,
+      resume: async ({ resumeSessionId }) => { log.resume.push(resumeSessionId) },
+    },
+  }
+}
+
+async function settle(log, budgetMs = 1500) {
+  const t0 = Date.now()
+  let last = -1
+  let stable = 0
+  while (Date.now() - t0 < budgetMs) {
+    await new Promise((r) => setTimeout(r, 15))
+    if (log.resume.length === last) {
+      if (++stable >= 3) return
+    } else {
+      last = log.resume.length
+      stable = 0
+    }
+  }
+}
+
+async function runCase(file, backendName) {
+  const log = { resume: [], warn: [] }
+  const original = console.warn
+  console.warn = (...args) => { log.warn.push(args.map(String).join(' ')) }
+  try {
+    const mod = await import(`${pathToFileURL(file).href}?r=${Math.random()}`)
+    mod.apply(makeCtx(BACKENDS[backendName](), log), { concurrency: 2 })
+    await settle(log)
+  } finally {
+    console.warn = original
+  }
+  return log
+}
+
+// ------------------------------------------------------------------ 断言
+const results = []
+
+function check(name, ok, detail) {
+  results.push({ name, ok, detail })
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  ← ${detail}`}`)
+}
+
+const sameSet = (a, b) => a.length === b.length && [...a].sort().join() === [...b].sort().join()
+
+// ------------------------------------------------------------------ 主流程
+const argv = process.argv.slice(2)
+let requestedPath = path.join(ROOT, 'lib', 'auto-resume.js')
+if (argv[0] === '--code') {
+  if (!argv[1]) { console.error('用法：node scripts/auto-resume.contract.selftest.mjs [--code <file>]'); process.exit(EXIT.USAGE) }
+  requestedPath = path.resolve(argv[1])
+} else if (argv.length > 0) {
+  console.error(`未知参数 ${argv[0]}；用法：node scripts/auto-resume.contract.selftest.mjs [--code <file>]`)
+  process.exit(EXIT.USAGE)
+}
+
+if (!existsSync(requestedPath)) {
+  console.error(`前置条件不成立：被测代码不存在 ${requestedPath}`)
+  process.exit(EXIT.INCOMPLETE)
+}
+if (!linkNodeModules()) {
+  console.error('前置条件不成立：无法为临时副本建立 node_modules 链接（@deepseek-ai/schemastery 不可解析）')
+  process.exit(EXIT.INCOMPLETE)
+}
+const codePath = stageCode(requestedPath)
+
+console.log('auto-resume 启动恢复契约门（auto-resume.contract.selftest.mjs）')
+console.log(`工作区：${ROOT}`)
+console.log(`被测代码（来源）：${requestedPath}  sha256(16)=${sha256(requestedPath)}`)
+console.log(`被测代码（副本）：${codePath}`)
+console.log(`临时目录：${WORK}`)
+console.log('')
+
+const before = manifest(ROOT)
+
+// 前置：被测模块必须能被加载（失败属"未完成验证"，不是"契约不成立"）
+try {
+  await import(`${pathToFileURL(codePath).href}?probe=${Math.random()}`)
+} catch (e) {
+  console.error(`前置条件不成立：被测模块无法导入 —— ${e.message}`)
+  process.exit(EXIT.INCOMPLETE)
+}
+
+// 1) 快照形状：六类输入的完整判别
+{
+  const log = await runCase(codePath, 'snapshot')
+  check('contract/snapshot-shape · 选中集合（六类输入）',
+    sameSet(log.resume, ['s-legal']),
+    `实际 resumed = [${log.resume.join(', ')}]，期望 [s-legal]`)
+  check('contract/snapshot-shape · 排除 subagent / parentSession / delegationDepth>0 / 开关 false / eventCount=0',
+    !log.resume.includes('s-subagent') && !log.resume.includes('s-child')
+      && !log.resume.includes('s-depth') && !log.resume.includes('s-off') && !log.resume.includes('s-blank'),
+    `实际多选出 = [${log.resume.filter((x) => x !== 's-legal').join(', ')}]`)
+}
+
+// 2) 裸 header 形状：向后兼容（eventCount 在裸形状不可得，故 s-blank 无法被排除——如实断言）
+{
+  const log = await runCase(codePath, 'bare')
+  check('contract/bare-header-shape · 选中集合（向后兼容 0.1.2 一线）',
+    sameSet(log.resume, ['s-legal', 's-blank']),
+    `实际 resumed = [${log.resume.join(', ')}]，期望 [s-legal, s-blank]（裸形状无 eventCount，空白判据不可得）`)
+}
+
+// 3) 未识别形状：必须零选中 + 有可诊断告警
+{
+  const log = await runCase(codePath, 'unrecognized')
+  check('contract/unrecognized-shape · 零选中', log.resume.length === 0,
+    `实际 resumed = [${log.resume.join(', ')}]`)
+  check('contract/unrecognized-shape · 有可诊断告警（不得静默）',
+    log.warn.some((w) => /unrecognized shape/i.test(w)),
+    `未捕获到告警；实际 warn = ${JSON.stringify(log.warn)}`)
+}
+
+// 4) 灵敏度对照：门必须能区分"坏代码"与"好代码"
+{
+  const blob = headBlob('lib/auto-resume.js')
+  if (!blob.ok) {
+    console.error(`前置条件不成立：取不到 HEAD:lib/auto-resume.js —— ${blob.why}`)
+    process.exit(EXIT.INCOMPLETE)
+  }
+  const legacy = await runCase(materialize('legacy-head', blob.text), 'snapshot')
+  check('sensibility/legacy-head-blob · 旧代码在快照形状下必须选不中（复现回归）',
+    legacy.resume.length === 0,
+    `旧代码竟然选中了 [${legacy.resume.join(', ')}] —— 本门的回归模型不成立`)
+
+  const current = readFileSync(path.join(ROOT, 'lib', 'auto-resume.js'), 'utf8')
+  const needle = 'const isSnapshot = item.header !== null && typeof item.header === \'object\''
+  if (!current.includes(needle)) {
+    console.error('前置条件不成立：当前 lib/auto-resume.js 中找不到形状判别那行，无法构造变异体')
+    process.exit(EXIT.INCOMPLETE)
+  }
+  const mutated = current.replace(needle, 'const isSnapshot = false')
+  const disabled = await runCase(materialize('mutate-normalize-disabled', mutated), 'snapshot')
+  check('sensibility/normalize-disabled · 判别永不触发时必须选不中（门自身可被证伪）',
+    disabled.resume.length === 0,
+    `变异体竟然选中了 [${disabled.resume.join(', ')}] —— 本门的断言不承重`)
+}
+
+// ------------------------------------------------------------------ 工作区对拍
+const diffs = manifestDiff(before, manifest(ROOT))
+check('guard/workspace-immutability', diffs.length === 0,
+  diffs.length ? diffs.join('；') : '')
+
+// ------------------------------------------------------------------ 汇总
+const failed = results.filter((r) => !r.ok)
+console.log('')
+console.log(`共 ${results.length} 条：通过 ${results.length - failed.length}，失败 ${failed.length}`)
+if (failed.length > 0) {
+  console.error('')
+  console.error(`契约门失败 ${failed.length} 条——被测代码不符合启动恢复契约，或门自身的灵敏度对照不成立：`)
+  for (const f of failed) console.error(`  - ${f.name}：${f.detail}`)
+  console.error(`副本保留在 ${WORK} 以供排查。`)
+  process.exit(EXIT.FAIL)
+}
+console.log('启动恢复契约成立：两种 list() 形状下都选对目标，未识别形状有可诊断告警，灵敏度对照复现，工作区零写入。')
+rmSync(WORK, { recursive: true, force: true })
+process.exit(EXIT.PASS)

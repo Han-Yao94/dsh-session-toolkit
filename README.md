@@ -161,6 +161,15 @@ Uninstall: `dsh plugin --profile web remove dsh-session-toolkit`.
 
 To iterate on the source without publishing, install the checkout directly (`dsh plugin --profile web add <path-to-checkout>`, which uses a pnpm `link:` dependency), or use a manual junction into the profile's `node_modules` plus an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer `dsh plugin add`.
 
+Verification gate for the source checkout only (`scripts/` is not shipped in the published package; no build step and no dependency install needed):
+
+```powershell
+pnpm check    # syntax gate — node --check over every shipped JS file
+pnpm verify   # + packaging contract — entry reachability, undeclared imports, EN/ZH README version parity
+```
+
+`pnpm verify` asserts that the working-tree content equals the tarball content, so it fails on purpose if a `prepare`/`prepack`/`prepublishOnly` script is ever added. The DSH integration-point inventory used when upgrading the harness lives in `docs/agents/integration-contracts.md`.
+
 ### Share & Install
 
 Published on **npm** as `dsh-session-toolkit` (v0.1.7, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
