@@ -28,6 +28,22 @@
  *   · 写路径必须与工作区根**双向无前缀包含**，且先判路径后落盘。
  *   · 子进程一律用文件描述符承接输出（本沙箱禁管道 stdio，会 EPERM）；stdout/stderr 分开落盘。
  *
+ * 负向对照从哪来（2026-09-11 修订，**替换掉「HEAD 即坏代码」这一前提**）：
+ *   原实现取 `HEAD:lib/auto-resume.js` 当"已知坏代码"。该前提**只在修复被提交之前成立**——
+ *   修复一旦进 HEAD（提交 `96751aa`），HEAD 的内容就变成好代码，对照物随即失效并让本门恒红
+ *   （实测：`FAIL sensibility/legacy-head-blob ← 旧代码竟然选中了 [s-legal]`）。这不是被测代码回归，
+ *   是**对照物随提交而消失**，属测量手段缺陷（协议 §5「验证手段本身必须先被验证」）。
+ *   修订后的取值顺序（判据是**内容指纹**，不是提交哈希；不新增任何"坏代码副本"文件，真源仍是 git 历史）：
+ *     1. HEAD 的 blob 若**不含**修复指纹（`normalizeEntry`）→ 它本身就是坏代码，直接用；
+ *     2. 否则从 HEAD 向前逐个提交找**最近一个仍含修复指纹**的提交 C（修复就是由它写入的），
+ *        取其父提交 `<C>^:lib/auto-resume.js` 作为坏代码——该提交存在即永久存在，对照可重复取得；
+ *     3. 都取不到 → `EXIT=3`（未完成验证），**不得**降级读作通过。
+ *   判别用 `normalizeEntry` 而非"是否含 isSnapshot 那行"：修复既**新增**了判别行也**新增**了归一化函数，
+ *   指纹必须能唯一定位本次修复；`isSnapshot` 在修复后的代码里存在，取它作指纹同样成立，但 `normalizeEntry`
+ *   更贴近"形状归一化"这一被守的契约本身。
+ *   修订后的实测（2026-09-11）：HEAD 含指纹 → 解析到 `96751aa^`（blob `c3a03842…`，即登记处 §3.1 的坏版本）
+ *   → 坏对照 `0` 选中、当前代码 `8/8 PASS EXIT=0`、变异体 `0` 选中。三态可证伪保持。
+ *
  * 已知未覆盖（明列，不沉默）：
  *   1. cordis 真实的 `ctx.inject` 时序（服务晚到 / 永不到）——本门用同一个 ctx 直接回调，不测调度。
  *   2. 真实持久化后端与真实 ~/.dsh/sessions（本门全部用合成后端；真实后端属 L3）。
@@ -111,14 +127,14 @@ function linkNodeModules() {
   }
 }
 
-/** 取 HEAD 里的旧版本（负向对照的真源，非转述）。 */
-function headBlob(rel) {
-  const outPath = path.join(WORK, 'head-blob.out')
-  const errPath = path.join(WORK, 'head-blob.err')
+/** 读取任意 `<rev>:<rel>` 的 blob（负向对照的真源是 git 历史，不是转述）。 */
+function gitBlob(revRel) {
+  const outPath = path.join(WORK, 'blob.out')
+  const errPath = path.join(WORK, 'blob.err')
   const outFd = openSync(outPath, 'w')
   const errFd = openSync(errPath, 'w')
   try {
-    const r = spawnSync('git', ['-C', ROOT, 'cat-file', 'blob', `HEAD:${rel}`],
+    const r = spawnSync('git', ['-C', ROOT, 'cat-file', 'blob', revRel],
       { stdio: ['ignore', outFd, errFd], env: process.env })
     if (r.status !== 0) return { ok: false, why: readFileSync(errPath, 'utf8').trim() || `git exit ${r.status}` }
     return { ok: true, text: readFileSync(outPath, 'utf8') }
@@ -126,6 +142,61 @@ function headBlob(rel) {
     closeSync(outFd)
     closeSync(errFd)
   }
+}
+
+function revList(...args) {
+  const outPath = path.join(WORK, 'rev.out')
+  const errPath = path.join(WORK, 'rev.err')
+  const outFd = openSync(outPath, 'w')
+  const errFd = openSync(errPath, 'w')
+  try {
+    const r = spawnSync('git', ['-C', ROOT, 'rev-list', ...args],
+      { stdio: ['ignore', outFd, errFd], env: process.env })
+    if (r.status !== 0) return { ok: false, why: readFileSync(errPath, 'utf8').trim() || `git exit ${r.status}` }
+    return { ok: true, revs: readFileSync(outPath, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean) }
+  } finally {
+    closeSync(outFd)
+    closeSync(errFd)
+  }
+}
+
+/**
+ * 修复指纹：形状归一化函数。修复前的代码没有它，故"含指纹 = 已是好代码"。
+ * 该字面量必须在当前 lib/auto-resume.js 中存在，否则视为门无法定位本次修复 → EXIT=3。
+ */
+const BAD_FINGERPRINT = 'function normalizeEntry'
+/** 回归扫描上限（防止仓库异常时无限回溯）。 */
+const MAX_LEGACY_SCAN = 50
+
+/**
+ * 取"已知坏代码"（形状归一化之前的版本）。取值判据是**内容指纹**，不是提交哈希：
+ * HEAD 不含指纹 → 直接用 HEAD；否则回溯找最近一个把指纹写进历史的提交，取其父版本。
+ * 回溯一步即够（修复提交自身的父版本就是坏版本），循环只是"未提交时的一步短路 + 异常兜底"。
+ */
+function resolveLegacyControl() {
+  const rel = 'lib/auto-resume.js'
+  const head = gitBlob(`HEAD:${rel}`)
+  if (!head.ok) return { ok: false, why: `取不到 HEAD:${rel} —— ${head.why}` }
+  if (!head.text.includes(BAD_FINGERPRINT)) {
+    return { ok: true, source: `HEAD:${rel}`, rev: 'HEAD', text: head.text, note: 'HEAD 本身即坏代码（修复尚未提交）' }
+  }
+  const rl = revList('-n', String(MAX_LEGACY_SCAN), 'HEAD')
+  if (!rl.ok) return { ok: false, why: `git rev-list 失败 —— ${rl.why}` }
+  for (const rev of rl.revs) {
+    const cur = gitBlob(`${rev}:${rel}`)
+    if (!cur.ok || !cur.text.includes(BAD_FINGERPRINT)) continue // 该提交尚未引入修复，或该提交没有此文件
+    const parent = gitBlob(`${rev}^:${rel}`)
+    if (!parent.ok) return { ok: false, why: `修复提交 ${rev} 的父版本不可读 —— ${parent.why}` }
+    if (parent.text.includes(BAD_FINGERPRINT)) continue // 指纹早已存在，说明修复不在此提交
+    return {
+      ok: true,
+      source: `${rev}^:${rel}`,
+      rev: `${rev}^`,
+      text: parent.text,
+      note: `HEAD 已含修复指纹（${BAD_FINGERPRINT}），回溯到引入它的提交 ${rev}，取其父版本作坏对照`,
+    }
+  }
+  return { ok: false, why: `最近 ${MAX_LEGACY_SCAN} 个提交里找不到引入「${BAD_FINGERPRINT}」的提交（工作区是否已含修复但未提交？请先提交）` }
 }
 
 function materialize(name, text) {
@@ -291,6 +362,13 @@ try {
   process.exit(EXIT.INCOMPLETE)
 }
 
+// 前置：指纹必须能在**被测文件**上定位，否则坏对照与变异体的取值依据不成立（未完成验证，不得读作通过）
+if (!readFileSync(requestedPath, 'utf8').includes(BAD_FINGERPRINT)) {
+  console.error(`前置条件不成立：被测文件里找不到指纹「${BAD_FINGERPRINT}」——无法定位形状归一化，坏对照与变异体均不成立`)
+  console.error(`被测文件：${requestedPath}`)
+  process.exit(EXIT.INCOMPLETE)
+}
+
 // 1) 快照形状：六类输入的完整判别
 {
   const log = await runCase(codePath, 'snapshot')
@@ -323,13 +401,14 @@ try {
 
 // 4) 灵敏度对照：门必须能区分"坏代码"与"好代码"
 {
-  const blob = headBlob('lib/auto-resume.js')
-  if (!blob.ok) {
-    console.error(`前置条件不成立：取不到 HEAD:lib/auto-resume.js —— ${blob.why}`)
+  const legacySrc = resolveLegacyControl()
+  if (!legacySrc.ok) {
+    console.error(`前置条件不成立：取不到已知坏代码（形状归一化之前的版本）—— ${legacySrc.why}`)
     process.exit(EXIT.INCOMPLETE)
   }
-  const legacy = await runCase(materialize('legacy-head', blob.text), 'snapshot')
-  check('sensibility/legacy-head-blob · 旧代码在快照形状下必须选不中（复现回归）',
+  console.log(`坏对照（${legacySrc.rev}）：${legacySrc.note}`)
+  const legacy = await runCase(materialize('legacy-head', legacySrc.text), 'snapshot')
+  check(`sensibility/legacy-baseline · 旧代码在快照形状下必须选不中（复现回归；来源 ${legacySrc.rev}）`,
     legacy.resume.length === 0,
     `旧代码竟然选中了 [${legacy.resume.join(', ')}] —— 本门的回归模型不成立`)
 
