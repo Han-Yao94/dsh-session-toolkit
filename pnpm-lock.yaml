@@ -12,22 +12,19 @@ importers:
         specifier: ^4.0.1
         version: 4.0.2
       '@deepseek-ai/dsh-client-locale':
-        specifier: ^0.1.2-alpha.1
+        specifier: ^0.1.2-alpha.2 || ^0.1.6-alpha.2
         version: 0.1.2-alpha.5(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
-        specifier: ^0.1.2-alpha.1
+        specifier: ^0.1.2-alpha.2 || ^0.1.6-alpha.2
         version: 0.1.2-alpha.2(@deepseek-ai/cordis@4.0.2)(react@18.3.1)
       '@deepseek-ai/dsh-client-ui-primitives':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.5(@deepseek-ai/cordis@4.0.2)
-      '@deepseek-ai/dsh-client-ui-slots':
-        specifier: ^0.1.2-alpha.1
+        specifier: ^0.1.2-alpha.2 || ^0.1.6-alpha.2
         version: 0.1.2-alpha.5(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-home-paths':
-        specifier: ^0.1.2-alpha.1
+        specifier: ^0.1.2-alpha.5 || ^0.1.6-alpha.2
         version: 0.1.2-alpha.5(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-tools':
-        specifier: ^0.1.2-alpha.1
+        specifier: ^0.1.2-alpha.5 || ^0.1.6-alpha.2
         version: 0.1.2-alpha.5(d031d96ea0c8995b40a270db2b7a6288)
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1

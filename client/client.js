@@ -6,19 +6,33 @@ window.__ModuleLoader__.load({
     // dsh-dev 整合包 client 半：5 个功能模块内联（IIFE 隔离变量），统一 apply 顺序注册
     var registered = {};
     function collect(tag, applyFn) { registered[tag] = applyFn; }
-    // client Config：cordis 注入（默认值=现状）；schemastery 在 client bundle 不可用时降级（不导出 Config、默认值兜底）
-    var z = null;
-    try { z = require('@deepseek-ai/schemastery'); } catch (e) { z = null; }
-    // 【提醒】新增 client 分键必须同步两处 schema：本 ClientConfig + lib/index.js 的 Config.client（否则 schemastery 丢弃该键，配置失效）
-    var ClientConfig = z === null ? null : z.object({
-      identityCharLimit: z.number().default(4000),
-      restartTimeoutMs: z.number().default(90000),
-      restartPollMs: z.number().default(1000),
-      restartFillMs: z.number().default(600),
-      copyFeedbackMs: z.number().default(1600),
-      restartFailThreshold: z.number().default(2),
-      restartSettleMs: z.number().default(8000),
-    });
+    // UI 旋钮：**不再**走 cordis 行配置——client 条目由 client-modules 以 loader.create({ name })
+    // 创建，boot graph 行只有 id/url/rev/inject/immediately/external，没有任何 config 字段，
+    // bundle 也拿不到 schemastery（不在平台模块表）因而导出不了自己的 Config。
+    // 唯一通道是 host 注册的 settings 命名空间 `session-toolkit-ui`（见 lib/ui-config.js）：
+    // host 把插件行 config.client.* 当组合 base，浏览器侧 apply 时 bind 并读快照。
+    // 命名空间不可用时用这份兜底值（= 历史默认值，行为零变化）。
+    // 【提醒】新增旋钮必须同步三处：lib/index.js 的 Config.client、lib/ui-config.js、本 UI_FALLBACK。
+    var UI_NAMESPACE = 'session-toolkit-ui';
+    var UI_FALLBACK = {
+      identityCharLimit: 4000,
+      restartTimeoutMs: 90000,
+      restartPollMs: 1000,
+      restartFillMs: 600,
+      restartFailThreshold: 2,
+      restartSettleMs: 8000,
+      copyFeedbackMs: 1600,
+    };
+    var uiCfg = Object.assign({}, UI_FALLBACK);
+    function readUiCfg(scope) {
+      if (!scope) return;
+      var snap = scope.getSnapshot();
+      var v = (snap && snap.value && typeof snap.value === 'object') ? snap.value : null;
+      if (!v) return;
+      Object.keys(UI_FALLBACK).forEach(function (key) {
+        if (typeof v[key] === 'number' && isFinite(v[key]) && v[key] > 0) uiCfg[key] = v[key];
+      });
+    }
 
     // ===== 模块 1：会话身份（identity，含自动上线开关行、header/input 双入口）=====
     (function () {
@@ -27,8 +41,10 @@ window.__ModuleLoader__.load({
   var React = require('react');
 
   var NS = 'session-identity-ui';
-  var CHAR_LIMIT = 4000;
-  var CHAR_WARN_AT = Math.floor(CHAR_LIMIT * 0.8);
+  // 字符上限来自 session-toolkit-ui 命名空间（见 factory 顶部的 uiCfg）：每次渲染时读取，
+  // 设置值变化后下一次渲染即生效（此前是 apply 时一次性捕获，配置改动永远不生效）。
+  function charLimit() { return uiCfg.identityCharLimit; }
+  function charWarnAt() { return Math.floor(uiCfg.identityCharLimit * 0.8); }
 
   var zh = {
     nav: '会话身份',
@@ -232,7 +248,9 @@ window.__ModuleLoader__.load({
         var ss = v2.sessions && typeof v2.sessions === 'object' ? v2.sessions : {};
         setOn(ss[sessionId] === true);
       });
-    }, []);
+      // sessionId 进依赖：会话切换但组件实例被复用时（slot 渲染器会复用实例，
+      // 见 useFloating 的注释），旧闭包会把别的会话状态写进来。
+    }, [sessionId]);
 
     // 容错：namespace 未就绪/不可用 → 渲染 null（hooks 已固定，安全）
     if (!snap || snap.status === 'loading' || snap.status === 'unavailable') return null;
@@ -354,7 +372,7 @@ window.__ModuleLoader__.load({
         setEnabled(function (prev) { return prev === prevSaved.enabled ? e.enabled : prev; });
         setText(function (prev) { return prev === prevSaved.text ? e.text : prev; });
       });
-    }, []);
+    }, [sessionId]);
 
     React.useEffect(function () {
       if (!toast) return;
@@ -536,9 +554,9 @@ window.__ModuleLoader__.load({
     }
 
     var count = text.length;
-    var countClass = 'si-count' + (count > CHAR_LIMIT ? ' si-count-error' : (count > CHAR_WARN_AT ? ' si-count-warn' : ''));
+    var countClass = 'si-count' + (count > charLimit() ? ' si-count-error' : (count > charWarnAt() ? ' si-count-warn' : ''));
     var dirty = enabled !== lastSavedRef.current.enabled || text.trim() !== lastSavedRef.current.text;
-    var overLimit = count > CHAR_LIMIT;
+    var overLimit = count > charLimit();
 
     if (mode === 'default') {
       return React.createElement(SiFrame, { onClose: onClose, onKeyDown: onKeyDown, t: t },
@@ -630,10 +648,7 @@ window.__ModuleLoader__.load({
   }
 
   function apply(ctx, cfg) {
-    // Config 分键（client.identityCharLimit），缺省兜底默认值
-    var limit = (cfg && typeof cfg.identityCharLimit === 'number') ? cfg.identityCharLimit : 4000;
-    CHAR_LIMIT = limit;
-    CHAR_WARN_AT = Math.floor(limit * 0.8);
+    // cfg 即 uiCfg（session-toolkit-ui 快照 / 兜底默认值），字符上限在使用处读取。
     injectCss();
     var locale = ctx.get('locale');
     var slots = ctx.get('slots');
@@ -817,6 +832,7 @@ collect('identity', apply);
     unsaved: '未保存',
     emptyWorkspaces: '暂无活跃工作区',
     emptyHint: '打开以某工作区为根目录的会话后，这里会自动列出并配置专属提示词。',
+    removedHint: '已从自动列表移除；重新启用或保存即可恢复。',
     inactive: '未活跃',
     remove: '移除',
     sessionUnit: '个会话',
@@ -854,13 +870,15 @@ collect('identity', apply);
     unsaved: 'Unsaved',
     emptyWorkspaces: 'No active workspaces',
     emptyHint: 'Open a conversation rooted at a workspace and it will appear here for its own prompt.',
+    removedHint: 'Removed from the auto list; re-enable or save to restore it.',
     inactive: 'Inactive',
     remove: 'Remove',
     sessionUnit: ' sessions',
   };
 
-  var CHAR_LIMIT = 4000;
-  var CHAR_WARN_AT = Math.floor(CHAR_LIMIT * 0.8);
+  // 字符上限来自 session-toolkit-ui（见 factory 顶部 uiCfg），渲染时读取。
+  function charLimit() { return uiCfg.identityCharLimit; }
+  function charWarnAt() { return Math.floor(uiCfg.identityCharLimit * 0.8); }
 
   function CheckIcon() {
     return React.createElement('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
@@ -912,6 +930,7 @@ collect('identity', apply);
     var wsScope = props.wsScope;
     var fsStatusScope = props.fsStatusScope;
     var active = props.active;
+    var removed = props.removed === true;
     var sessionCount = props.sessionCount;
     var onRemove = props.onRemove;
     var useState = React.useState;
@@ -963,11 +982,26 @@ collect('identity', apply);
         var r = ws[path] || {};
         var e = r.enabled === true;
         var c = typeof r.content === 'string' ? r.content : '';
+        // 只在「本地编辑态 == 上次已保存值」时同步外部变更；用户正在输入/切换时保留输入，
+        // 否则 autosave 落地或另一行保存触发的快照刷新会把当前编辑回退掉。
+        var prevSaved = lastSavedRef.current;
         lastSavedRef.current = { enabled: e, content: c };
-        setEnabled(e);
-        setContent(c);
+        setEnabled(function (prev) { return prev === prevSaved.enabled ? e : prev; });
+        setContent(function (prev) { return prev === prevSaved.content ? c : prev; });
       });
     }, [path]);
+
+    // 用户此前点过「移除」的路径记在 workspace-prompt.removed 里；重新启用或保存 = 明确恢复，
+    // 因此要把该路径从 removed 摘掉，否则下次工作区同步仍会把它当作「用户已移除」。
+    function clearRemoved() {
+      var s = wsScope.getSnapshot();
+      var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+      var rd = Array.isArray(v.removed) ? v.removed.slice() : [];
+      var idx = rd.indexOf(path);
+      if (idx === -1) return Promise.resolve();
+      rd.splice(idx, 1);
+      return Promise.resolve(wsScope.set('removed', rd));
+    }
 
     useEffect(function () {
       if (!toast) return;
@@ -984,6 +1018,8 @@ collect('identity', apply);
       var next = { enabled: cur.enabled, content: content, files: files };
       ws[path] = next;
       Promise.resolve(wsScope.set('workspaces', ws)).then(function () {
+        return clearRemoved();
+      }).then(function () {
         var s2 = wsScope.getSnapshot();
         var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
         var ws2 = (v2.workspaces && typeof v2.workspaces === 'object') ? v2.workspaces : {};
@@ -1010,6 +1046,8 @@ collect('identity', apply);
       rec.enabled = next;
       ws[path] = rec;
       Promise.resolve(wsScope.set('workspaces', ws)).then(function () {
+        if (next === true) return clearRemoved();
+      }).then(function () {
         var s2 = wsScope.getSnapshot();
         var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
         var ws2 = (v2.workspaces && typeof v2.workspaces === 'object') ? v2.workspaces : {};
@@ -1033,7 +1071,7 @@ collect('identity', apply);
     }
 
     var count = content.length;
-    var countClass = 'dsw-count' + (count > CHAR_LIMIT ? ' dsw-count-error' : (count > CHAR_WARN_AT ? ' dsw-count-warn' : ''));
+    var countClass = 'dsw-count' + (count > charLimit() ? ' dsw-count-error' : (count > charWarnAt() ? ' dsw-count-warn' : ''));
     var disabled = !enabled;
     var dirty = enabled !== lastSavedRef.current.enabled || content !== lastSavedRef.current.content;
     var rowTitle = active ? path : (path + ' · ' + t('inactive'));
@@ -1062,7 +1100,8 @@ collect('identity', apply);
             React.createElement('label', { className: 'dsw-label', htmlFor: areaId }, t('contentLabel')),
             React.createElement('span', { className: countClass }, String(count) + ' ' + t('charUnit'))),
           React.createElement('textarea', { id: areaId, className: 'dsw-area', value: content, disabled: disabled, spellCheck: false, placeholder: t('placeholder'), onChange: function (e) { setContent(e.target.value); } })),
-          React.createElement(FileRefsPanel, { t: t, files: files, onFilesChange: onWsFilesChange, statuses: wsFileStatus }),
+        React.createElement(FileRefsPanel, { t: t, files: files, onFilesChange: onWsFilesChange, statuses: wsFileStatus }),
+        removed ? React.createElement('div', { className: 'dsw-removed-hint' }, t('removedHint')) : null,
         React.createElement('div', { className: 'dsw-actions' },
           dirty ? React.createElement('span', { className: 'dsw-unsaved', role: 'status' }, t('unsaved')) : null,
           React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', onClick: function () { onRemove(path); } }, t('remove')),
@@ -1168,9 +1207,16 @@ collect('identity', apply);
       return scope.subscribe(function () {
         var s = scope.getSnapshot();
         var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
-        setGEnabled(v.enabled === true);
-        setGContent(typeof v.content === 'string' ? v.content : '');
-        gLastSavedRef.current = { enabled: v.enabled === true, content: typeof v.content === 'string' ? v.content : '' };
+        // 与身份模块同款保护：只有本地编辑态等于上次已保存值时才接受外部变更，
+        // 否则 autosave 落地（或另一处写入）触发的快照刷新会回退正在输入的内容。
+        var next = {
+          enabled: v.enabled === true,
+          content: typeof v.content === 'string' ? v.content : '',
+        };
+        var prevSaved = gLastSavedRef.current;
+        gLastSavedRef.current = next;
+        setGEnabled(function (prev) { return prev === prevSaved.enabled ? next.enabled : prev; });
+        setGContent(function (prev) { return prev === prevSaved.content ? next.content : prev; });
       });
     }, []);
 
@@ -1231,7 +1277,7 @@ collect('identity', apply);
     }
 
     var gCount = gContent.length;
-    var gCountClass = 'dsw-count' + (gCount > CHAR_LIMIT ? ' dsw-count-error' : (gCount > CHAR_WARN_AT ? ' dsw-count-warn' : ''));
+    var gCountClass = 'dsw-count' + (gCount > charLimit() ? ' dsw-count-error' : (gCount > charWarnAt() ? ' dsw-count-warn' : ''));
     var gDisabled = !gEnabled;
     var gDirty = gEnabled !== gLastSavedRef.current.enabled || gContent !== gLastSavedRef.current.content;
 
@@ -1243,8 +1289,27 @@ collect('identity', apply);
     var actSnap = activeScope.getSnapshot();
     var actValue = (actSnap && actSnap.value && typeof actSnap.value === 'object') ? actSnap.value : {};
     var activeList = Array.isArray(actValue.active) ? actValue.active : [];
-    var activeMap = {};
-    for (var ai = 0; ai < activeList.length; ai++) { activeMap[activeList[ai].path] = activeList[ai].sessionCount; }
+    var removedList = Array.isArray(wsValue.removed) ? wsValue.removed : [];
+    // 行来源 = 活跃投影 ∪ 已配置工作区。只列活跃会让「没有在线会话的工作区」永远无法编辑
+    // （inactive 文案/分支此前是不可达的死代码），而 remove 之后行仍在也让人以为移除没生效。
+    var rows = [];
+    var seenPath = {};
+    for (var ai = 0; ai < activeList.length; ai++) {
+      var ap = activeList[ai].path;
+      if (seenPath[ap]) continue;
+      seenPath[ap] = true;
+      rows.push({ path: ap, sessionCount: activeList[ai].sessionCount, active: true });
+    }
+    var configuredPaths = Object.keys(workspaces);
+    for (var ci = 0; ci < configuredPaths.length; ci++) {
+      var cp = configuredPaths[ci];
+      if (seenPath[cp]) continue;
+      // 已被用户移除、且当前没有活跃会话的路径：不再显示（有活跃会话时仍保留行，
+      // 因为那是把它配置回来的唯一入口）。
+      if (removedList.indexOf(cp) !== -1) continue;
+      seenPath[cp] = true;
+      rows.push({ path: cp, sessionCount: 0, active: false });
+    }
 
     function removeWorkspace(pathKey) {
       var remS = wsScope.getSnapshot();
@@ -1312,13 +1377,13 @@ collect('identity', apply);
                 } }, t('reset'))),
               gToast ? React.createElement(Toast, { toast: gToast, t: t }) : null)
           : React.createElement('div', { className: 'dsw-workspace' },
-              activeList.length === 0
+              rows.length === 0
                 ? React.createElement('div', { className: 'dsw-empty' },
                     React.createElement(primitives.IconArchiveOutline20, { size: 20 }),
                     React.createElement('div', { className: 'dsw-empty-title' }, t('emptyWorkspaces')),
                     React.createElement('div', { className: 'dsw-empty-hint' }, t('emptyHint')))
-                : React.createElement('div', { className: 'dsw-ws-list' }, activeList.map(function (item) {
-                    return React.createElement(WorkspaceRow, { key: item.path, t: t, path: item.path, ctx: ctx, wsScope: wsScope, fsStatusScope: fsStatusScope, active: true, sessionCount: item.sessionCount, onRemove: removeWorkspace });
+                : React.createElement('div', { className: 'dsw-ws-list' }, rows.map(function (item) {
+                    return React.createElement(WorkspaceRow, { key: item.path, t: t, path: item.path, ctx: ctx, wsScope: wsScope, fsStatusScope: fsStatusScope, active: item.active, removed: removedList.indexOf(item.path) !== -1, sessionCount: item.sessionCount, onRemove: removeWorkspace });
                   })))));
   }
 
@@ -1333,9 +1398,7 @@ collect('identity', apply);
   }
 
   function apply(ctx, cfg) {
-    var limit = (cfg && typeof cfg.identityCharLimit === 'number') ? cfg.identityCharLimit : 4000;
-    CHAR_LIMIT = limit;
-    CHAR_WARN_AT = Math.floor(limit * 0.8);
+    // cfg 即 uiCfg（session-toolkit-ui 快照 / 兜底默认值），字符上限在使用处读取。
     injectCss();
     var locale = ctx.get('locale');
     var slots = ctx.get('slots');
@@ -1413,6 +1476,7 @@ collect('identity', apply);
     '.dsw-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:56px 24px;text-align:center;color:var(--dsw-text-sub)}',
     '.dsw-empty-title{font-size:14px;font-weight:500;color:var(--dsw-text-body)}',
     '.dsw-empty-hint{font-size:12px;color:var(--dsw-text-sub);max-width:380px;line-height:1.6}',
+    '.dsw-removed-hint{font-size:12px;color:var(--dsw-warn);transition:color .2s ease}',
     '.dsw-files{display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;font-family:var(--dsw-font-family)}',
     '.dsw-files-label{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary)}',
     '.dsw-files-list{display:flex;flex-direction:column;gap:4px}',
@@ -1453,14 +1517,14 @@ collect('identity', apply);
     var react_jsx_runtime = require('react/jsx-runtime');
 
     var NS = 'web-restart-ui';
-    // 重启覆盖层可调参数（Config client 分键，apply 时赋值；组件渲染时读取）
-    var restartTimeoutMs = 90000;
-    var restartPollMs = 1000;
-    var restartFillMs = 600;
+    // 重启覆盖层可调参数来自 session-toolkit-ui 命名空间（见 factory 顶部 uiCfg），使用时读取。
+    function restartTimeoutMs() { return uiCfg.restartTimeoutMs; }
+    function restartPollMs() { return uiCfg.restartPollMs; }
+    function restartFillMs() { return uiCfg.restartFillMs; }
     // 连续失败阈值：达到该次数才判定"观测到服务器中断"，防单次网络抖动假中断
-    var restartFailThreshold = 2;
+    function restartFailThreshold() { return uiCfg.restartFailThreshold; }
     // 恢复后再额外等待的稳定窗口（ms）：给 DSH 后端会话数据就绪留时间，避免 reload 过早导致导航栏标题 fallback
-    var restartSettleMs = 8000;
+    function restartSettleMs() { return uiCfg.restartSettleMs; }
 
     var zh = {
       label: '重启服务',
@@ -1473,6 +1537,7 @@ collect('identity', apply);
       ready: '服务已恢复，即将刷新…',
       noRestart: '未检测到服务重启，可能重启脚本未执行；请手动刷新。',
       timeout: '重启超时，请检查服务或手动刷新。',
+      restartRejected: '重启请求被拒绝',
       refresh: '手动刷新',
     };
 
@@ -1487,6 +1552,7 @@ collect('identity', apply);
       ready: 'Service restored, refreshing…',
       noRestart: 'No restart detected. The restart script may not have run; refresh manually.',
       timeout: 'Restart timed out. Check the service or refresh manually.',
+      restartRejected: 'Restart request rejected',
       refresh: 'Refresh now',
     };
 
@@ -1524,7 +1590,7 @@ collect('identity', apply);
           setTimedOut(true);
           // 超时时区分：从未中断（全程可达）= 未检测到重启；中断过未恢复 = 重启未完成
           if (!interruptedRef.current) setNoRestart(true);
-        }, restartTimeoutMs);
+        }, restartTimeoutMs());
         // 轮询 GET /api/restart：失败连续达到阈值才判定"观测到中断"；中断后恢复才算真重启。
         var poll = ctx.interval(function () {
           fetch('/api/restart', { method: 'GET', cache: 'no-store' })
@@ -1539,7 +1605,7 @@ collect('identity', apply);
                   setDetected(true);
                   poll();
                   timeoutTimer();
-                  reloadTimer = ctx.timeout(function () { location.reload(); }, restartFillMs + restartSettleMs);
+                  reloadTimer = ctx.timeout(function () { location.reload(); }, restartFillMs() + restartSettleMs());
                 }
                 // interruptedRef 为 false（全程可达）：可能是 stop 慢/脚本未执行，不 reload，继续等待
               } else {
@@ -1549,7 +1615,7 @@ collect('identity', apply);
                 }
               }
             });
-        }, restartPollMs);
+        }, restartPollMs());
         return function () {
           poll();
           timeoutTimer();
@@ -1559,7 +1625,7 @@ collect('identity', apply);
 
       // 每秒 tick 驱动进度条推进
       useEffect(function () {
-        var iv = ctx.interval(function () { tickState[1](function (x) { return x + 1; }); }, restartPollMs);
+        var iv = ctx.interval(function () { tickState[1](function (x) { return x + 1; }); }, restartPollMs());
         return function () { iv(); };
       }, []);
 
@@ -1568,7 +1634,7 @@ collect('identity', apply);
       var elapsedSec = elapsedMs / 1000;
       var progress;
       if (detected && detectedAtRef.current !== null) {
-        progress = Math.min(100, 90 + ((Date.now() - detectedAtRef.current) / 600) * 10);
+        progress = Math.min(100, 90 + ((Date.now() - detectedAtRef.current) / restartFillMs()) * 10);
       } else {
         progress = 5 + Math.min(85, (elapsedSec / 90) * 85);
       }
@@ -1611,12 +1677,43 @@ collect('identity', apply);
       var useState = react.useState;
       var phaseState = useState('idle');
       var phase = phaseState[0], setPhase = phaseState[1];
+      var errState = useState(null);
+      var err = errState[0], setErr = errState[1];
+      // 可用性探测：GET /api/restart 回报 { ok, available }；非 Windows（或路由不存在、
+      // 探测失败）时不渲染入口——此前的形态是入口照常显示、点一次后覆盖层空转到 90s 超时。
+      var availState = useState('probing');
+      var avail = availState[0], setAvail = availState[1];
+
+      react.useEffect(function () {
+        var cancelled = false;
+        fetch('/api/restart', { method: 'GET', cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) {
+            if (cancelled) return;
+            setAvail(j && j.available === false ? 'unavailable' : (j ? 'available' : 'unavailable'));
+          })
+          .catch(function () { if (!cancelled) setAvail('unavailable'); });
+        return function () { cancelled = true; };
+      }, []);
+
+      if (avail !== 'available') return null;
 
       function onClick() {
         if (phase !== 'idle') return;
-        // 立即进入覆盖层；POST 后台发出（202 / 409 / 网络失败都视为已进入重启流程）
-        setPhase('restarting');
-        fetch('/api/restart', { method: 'POST', cache: 'no-store' }).catch(function () {});
+        setErr(null);
+        // 只有拿到 202 才进入覆盖层：409（已在重启中）、500（脚本缺失/无法自动重启）、
+        // 501（平台不支持）、404（路由缺失）都在这里立即报错，而不是让覆盖层空转到超时。
+        fetch('/api/restart', { method: 'POST', cache: 'no-store' })
+          .then(function (r) {
+            if (r.status === 202) { setPhase('restarting'); return null; }
+            return r.json().catch(function () { return null; }).then(function (body) {
+              var detail = (body && body.error) ? body.error : ('HTTP ' + r.status);
+              setErr(t('restartRejected') + ': ' + detail);
+            });
+          })
+          .catch(function (e) {
+            setErr(t('restartRejected') + ': ' + (e && e.message ? e.message : String(e)));
+          });
       }
 
       return react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, {
@@ -1634,6 +1731,7 @@ collect('identity', apply);
               react_jsx_runtime.jsx('button', { type: 'button', className: 'wr-item-btn', disabled: phase !== 'idle', onClick: onClick, children: t('label') }),
             ],
           }),
+          err ? react_jsx_runtime.jsx('div', { className: 'wr-item-error', role: 'status', children: err }) : null,
           phase === 'restarting' ? react_jsx_runtime.jsx(RestartOverlay, { t: t, ctx: ctx }) : null,
         ],
       });
@@ -1642,11 +1740,7 @@ collect('identity', apply);
     var inject = ['slots', 'locale', 'timer'];
 
     function apply(ctx, cfg) {
-      restartTimeoutMs = (cfg && typeof cfg.restartTimeoutMs === 'number') ? cfg.restartTimeoutMs : 90000;
-      restartPollMs = (cfg && typeof cfg.restartPollMs === 'number') ? cfg.restartPollMs : 1000;
-      restartFillMs = (cfg && typeof cfg.restartFillMs === 'number') ? cfg.restartFillMs : 600;
-      restartFailThreshold = (cfg && typeof cfg.restartFailThreshold === 'number') ? cfg.restartFailThreshold : 2;
-      restartSettleMs = (cfg && typeof cfg.restartSettleMs === 'number') ? cfg.restartSettleMs : 8000;
+      // cfg 即 uiCfg（session-toolkit-ui 快照 / 兜底默认值），参数在使用处读取。
       injectCss();
       var locale = ctx.get('locale');
       var slots = ctx.get('slots');
@@ -1684,6 +1778,7 @@ collect('identity', apply);
       '.wr-item-text{display:flex;flex-direction:column;gap:2px;min-width:0}',
       '.wr-item-label{font-size:14px;font-weight:500;color:var(--dsw-alias-label-primary)}',
       '.wr-item-desc{font-size:12px;color:var(--dsw-alias-label-secondary)}',
+      '.wr-item-error{font-size:12px;color:var(--dsw-alias-state-error-primary);padding:0 0 8px}',
       '.wr-item-btn{flex:none;height:32px;padding:0 16px;border:none;border-radius:8px;background:var(--dsw-alias-button-primary-fill);color:#fff;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:background .2s ease}',
       '.wr-item-btn:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}',
       '.wr-item-btn:disabled{opacity:.45;cursor:not-allowed}',
@@ -1710,9 +1805,14 @@ collect('web-restart', apply);
     var primitives = require('@deepseek-ai/dsh-client-ui-primitives');
     var runtime_client = require('@deepseek-ai/dsh-client-store');
 
-    // 独立 NS：复制官方 dialog 文案，避免与官方 NS 'session-log-download' 重复注册冲突
+    // 独立 NS：复制官方文案（dialog + menu/header），避免与官方 NS 'session-log-download' 重复注册冲突。
+    // 【随 DSH 升级复核】本模块复刻官方 session-log-export 的浏览器半（0.1.6-alpha.2 形态：
+    // utilities 里的「⋯ 更多操作」菜单 + 共享 Dialog），官方改版时必须同步，否则被遮蔽的官方
+    // 入口会连同新功能一起消失。
     var NS = 'session-log-reposition';
     var zh = {
+      'header.more': '更多操作',
+      'menu.download': '下载 Session 日志',
       'dialog.preparingTitle': '正在导出 Session',
       'dialog.preparingDescription': '正在准备包含当前 Session、子 Session 和附件的 ZIP 文件。',
       'dialog.successTitle': 'Session 导出已开始下载',
@@ -1722,6 +1822,8 @@ collect('web-restart', apply);
       'dialog.commandFailed': '无法启动 Session 导出。',
     };
     var en = {
+      'header.more': 'More actions',
+      'menu.download': 'Download session log',
       'dialog.preparingTitle': 'Exporting Session',
       'dialog.preparingDescription': 'Preparing a ZIP containing this Session, its sub-Sessions, and attachments.',
       'dialog.successTitle': 'Session download started',
@@ -1731,8 +1833,8 @@ collect('web-restart', apply);
       'dialog.commandFailed': 'Could not start the Session export.',
     };
 
-    // CSS：复制官方 .nL4_yW_sessionLogButton 规则，类名换前缀防撞
-    var css = '.slr-sessionLogButton{border:1px solid var(--dsw-alias-border-l2);min-width:111px;height:32px;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);cursor:pointer;background:0 0;border-radius:18px;justify-content:center;align-items:center;gap:4px;padding:6px 12px;font-size:13px;font-weight:400;line-height:20px;display:inline-flex}.slr-sessionLogButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.slr-sessionLogButton:disabled{color:var(--dsw-alias-label-dimmed);cursor:wait}.slr-sessionLogButton span,.slr-sessionLogButton svg{flex:none}.slr-sessionLogButton span{white-space:nowrap}';
+    // CSS：复制官方 HeaderAction.module.css 的 .moreButton 规则，类名换前缀防撞
+    var css = '.slr-moreButton{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:6px;color:var(--dsw-alias-label-secondary);background:transparent;border:none;border-radius:28px;cursor:pointer}.slr-moreButton svg{width:15px;height:15px}.slr-moreButton:hover{background:var(--dsw-alias-interactive-bg-hover)}';
     var cssTagId = 'dsh-session-log-reposition/HeaderAction.module.css';
     if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css=' + JSON.stringify(cssTagId) + ']') === null) {
       var tag = document.createElement('style');
@@ -1770,26 +1872,42 @@ collect('web-restart', apply);
     }
 
     /**
-     * 复制的官方胶囊按钮 + 共享 Dialog；逻辑全部转发官方 sessionLogDownload controller。
+     * 复制的官方「⋯ 更多操作」菜单（0.1.6 形态）+ 共享 Dialog；
+     * 状态与动作全部转发官方 sessionLogDownload controller。
      */
     function SessionLogDownloadHeaderAction(props) {
       var sessionId = props.sessionId;
       var useSessionLogDownload = props.useSessionLogDownload;
       var request = props.request;
+      var t = props.t;
       var busyEntry = useSessionLogDownload(function (state) { return state.bySession[String(sessionId)]; });
       var busy = busyEntry ? busyEntry.status === 'downloading' : false;
+      var openState = react.useState(false);
+      var open = openState[0], setOpen = openState[1];
       return react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, {
         children: [
-          react_jsx_runtime.jsxs('button', {
-            type: 'button',
-            className: 'slr-sessionLogButton',
-            disabled: busy,
-            'aria-busy': busy,
-            onClick: function () { request(sessionId); },
-            children: [
-              react_jsx_runtime.jsx('span', { children: 'Session log' }),
-              react_jsx_runtime.jsx(primitives.IconDownloadOutline16, { size: 12 }),
-            ],
+          react_jsx_runtime.jsx(primitives.Menu, {
+            open: open,
+            align: 'end',
+            dense: true,
+            onClose: function () { setOpen(false); },
+            items: [{
+              id: 'download',
+              label: t('menu.download'),
+              icon: react_jsx_runtime.jsx(primitives.IconDownloadOutline16, {}),
+              disabled: busy,
+            }],
+            onSelect: function () { setOpen(false); void request(sessionId); },
+            anchor: react_jsx_runtime.jsx('button', {
+              type: 'button',
+              className: 'slr-moreButton',
+              'aria-label': t('header.more'),
+              'aria-haspopup': 'menu',
+              'aria-expanded': open,
+              'aria-busy': busy,
+              onClick: function () { setOpen(function (value) { return !value; }); },
+              children: react_jsx_runtime.jsx(primitives.IconEllipsisOutline16, {}),
+            }),
           }),
           react_jsx_runtime.jsx(SessionLogDownloadDialog, Object.assign({}, props)),
         ],
@@ -1863,8 +1981,8 @@ collect('log-reposition', apply);
     var NS = 'peer-message-ui';
     var zh = { copied: '已复制', copy: '复制会话 ID' };
     var en = { copied: 'Copied', copy: 'Copy session ID' };
-    // 复制反馈时长可调参数（Config client.copyFeedbackMs，apply 时赋值）
-    let copyFeedbackMs = 1600;
+    // 复制反馈时长来自 session-toolkit-ui（见 factory 顶部 uiCfg），使用时读取
+    function copyFeedbackMs() { return uiCfg.copyFeedbackMs; }
 
     /** Header action: copy this session's id to the clipboard, with a brief check mark feedback. */
     function CopySessionIdAction({ sessionId, ctx, t }) {
@@ -1874,7 +1992,7 @@ collect('log-reposition', apply);
         navigator.clipboard.writeText(String(sessionId)).then(() => {
           setCopied(true);
           if (timerRef.current !== null) timerRef.current();
-          timerRef.current = ctx.timeout(() => setCopied(false), copyFeedbackMs);
+          timerRef.current = ctx.timeout(() => setCopied(false), copyFeedbackMs());
         }).catch((error) => {
           console.error('[peer-message] copy session id failed:', error);
         });
@@ -1910,7 +2028,6 @@ collect('log-reposition', apply);
     const inject = ['slots', 'timer'];
 
     function apply(ctx, cfg) {
-      copyFeedbackMs = (cfg && typeof cfg.copyFeedbackMs === 'number') ? cfg.copyFeedbackMs : 1600;
       var locale = ctx.get('locale');
       var t = function (k) { return zh[k] || k; };
       if (locale) {
@@ -1935,14 +2052,27 @@ collect('log-reposition', apply);
 collect('peer-message', apply);
     })();
 
-    function apply(ctx, config) {
-      var clientCfg = (config && config.client && typeof config.client === 'object') ? config.client : {};
+    function apply(ctx) {
+      // UI 旋钮通道：bind 命名空间并立即读一次（镜像可能还在 loading，此时保持兜底值；
+      // subscribe 在快照到达后补齐）。scope 生命周期随本插件 fiber。
+      var settingsScope = ctx.get('settingsScope');
+      if (settingsScope) {
+        try {
+          var uiScope = settingsScope.bind({ namespace: UI_NAMESPACE });
+          if (uiScope) {
+            readUiCfg(uiScope);
+            ctx.effect(function () {
+              return uiScope.subscribe(function () { readUiCfg(uiScope); });
+            }, 'dsh-session-toolkit: ui config');
+          }
+        } catch (e) { /* 命名空间不可用 → 保持 UI_FALLBACK */ }
+      }
+      var clientCfg = uiCfg;
       Object.keys(registered).forEach(function (tag) {
         try { registered[tag](ctx, clientCfg); } catch (e) { console.warn('[dsh-session-toolkit] client module ' + tag + ' apply failed: ' + (e && e.message ? e.message : String(e))); }
       });
     }
     var inject = ['slots', 'locale', 'settingsScope', 'timer'];
-    if (ClientConfig !== null) exports.Config = ClientConfig;
     exports.apply = apply;
     exports.inject = inject;
     return module.exports;

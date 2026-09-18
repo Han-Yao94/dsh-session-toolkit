@@ -261,23 +261,38 @@ const BACKENDS = {
 }
 
 // ------------------------------------------------------------------ 运行器
-function makeCtx(backend, log) {
+function makeCtx(backend, log, options = {}) {
   const scope = {
     get: () => ({ sessions: ENABLED }),
     watch: () => () => {},
     update: async () => {},
     replace: async () => {},
   }
-  const childCtx = { get: (name) => (name === 'sessionPersistence' ? backend : undefined) }
+  // options.controller：模拟 0.1.6 才有的官方恢复链路 ctx.sessionController.resolveAgent()。
+  const controller = options.controller === true
+    ? { resolveAgent: async (sessionId) => { log.controller.push(sessionId); return { agent: {} } } }
+    : undefined
+  const childCtx = {
+    get: (name) => {
+      if (name === 'sessionPersistence') return backend
+      if (name === 'sessionController') return controller
+      return undefined
+    },
+    effect: (fn) => { const d = fn(); return typeof d === 'function' ? d : () => {} },
+  }
   return {
     settings: { register: () => scope },
     get: (name) => {
       if (name === 'sessionPersistence') return backend // 旧代码在 apply 时刻一次性取值
+      if (name === 'sessionController') return controller
       if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'p', model: 'm' }) }
       return undefined
     },
     // 新代码用 ctx.inject 等服务就绪；这里同步回调，模拟"服务已在"
-    inject: (names, cb) => { if (names.includes('sessionPersistence')) cb(childCtx) },
+    inject: (names, cb) => {
+      if (names.includes('sessionPersistence')) cb(childCtx)
+      else if (controller !== undefined && names.includes('sessionController')) cb(childCtx)
+    },
     agents: {
       get: () => undefined,
       resume: async ({ resumeSessionId }) => { log.resume.push(resumeSessionId) },
@@ -300,13 +315,13 @@ async function settle(log, budgetMs = 1500) {
   }
 }
 
-async function runCase(file, backendName) {
-  const log = { resume: [], warn: [] }
+async function runCase(file, backendName, options = {}) {
+  const log = { resume: [], controller: [], warn: [] }
   const original = console.warn
   console.warn = (...args) => { log.warn.push(args.map(String).join(' ')) }
   try {
     const mod = await import(`${pathToFileURL(file).href}?r=${Math.random()}`)
-    mod.apply(makeCtx(BACKENDS[backendName](), log), { concurrency: 2 })
+    mod.apply(makeCtx(BACKENDS[backendName](), log, options), { concurrency: 2 })
     await settle(log)
   } finally {
     console.warn = original
@@ -399,6 +414,16 @@ if (!readFileSync(requestedPath, 'utf8').includes(BAD_FINGERPRINT)) {
     `未捕获到告警；实际 warn = ${JSON.stringify(log.warn)}`)
 }
 
+// 3.5) 官方恢复链路优先（0.1.6+ ctx.sessionController.resolveAgent）：一旦可用就必须走它
+//      （模型选择 installSelection、preset mount、归属校验都在里面），不得再手工 ctx.agents.resume。
+{
+  const log = await runCase(codePath, 'snapshot', { controller: true })
+  check('contract/session-controller · 走官方 resolveAgent 且不再手工 resume',
+    sameSet(log.controller, ['s-legal']) && log.resume.length === 0,
+    `controller 调用 = [${log.controller.join(', ')}]，agents.resume = [${log.resume.join(', ')}]`
+    + '（期望 controller=[s-legal] 且 agents.resume 为空）')
+}
+
 // 4) 灵敏度对照：门必须能区分"坏代码"与"好代码"
 {
   const legacySrc = resolveLegacyControl()
@@ -423,6 +448,22 @@ if (!readFileSync(requestedPath, 'utf8').includes(BAD_FINGERPRINT)) {
   check('sensibility/normalize-disabled · 判别永不触发时必须选不中（门自身可被证伪）',
     disabled.resume.length === 0,
     `变异体竟然选中了 [${disabled.resume.join(', ')}] —— 本门的断言不承重`)
+
+  // 官方链路优先分支同样要能证伪：关掉优先分支后，controller 断言必须报红。
+  const controllerNeedle = 'if (sessionController !== undefined) {'
+  if (!current.includes(controllerNeedle)) {
+    console.error('前置条件不成立：当前 lib/auto-resume.js 中找不到 sessionController 优先分支，无法构造变异体')
+    process.exit(EXIT.INCOMPLETE)
+  }
+  const noController = await runCase(
+    materialize('mutate-controller-branch-disabled', current.replace(controllerNeedle, 'if (false) {')),
+    'snapshot',
+    { controller: true },
+  )
+  check('sensibility/session-controller-branch · 关掉优先分支后该断言必须报红',
+    noController.controller.length === 0 && noController.resume.length > 0,
+    `变异体 controller 调用 = [${noController.controller.join(', ')}]，agents.resume = [${noController.resume.join(', ')}]`
+    + '（期望 controller 为空且 agents.resume 非空）')
 }
 
 // ------------------------------------------------------------------ 工作区对拍

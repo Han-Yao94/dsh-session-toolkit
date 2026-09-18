@@ -41,6 +41,10 @@ jobs:
         with:
           node-version: 20
       - run: node scripts/verify.selftest.mjs
+      # 两个安装侧探测器的**自证**（造物在 os.tmpdir()，不依赖已装 profile 或 harness checkout）：
+      # 判定逻辑必须能报红、且不误报。真实验收见 docs/agents/integration-contracts.md §D 步骤 7/8。
+      - run: node scripts/dependency-skew.measure.mjs --selftest
+      - run: node scripts/dsh-log-ui.drift.mjs --selftest
       # tag 守卫的本机无法验证项：从上面 publish-npm 的工件里**抽取**真正的 case 块来执行，
       # 而不是在测试里重写一份逻辑（重写就等于测自己）。ubuntu-latest 自带 bash；
       # 开发者本机若无 POSIX shell，这一步只在 CI 上提供证据。
@@ -95,10 +99,24 @@ jobs:
           node-version: 20
       - run: node scripts/anchor.contract.selftest.mjs
 
+  prompt-contract:
+    # 提示词管线契约门：跨段去重不得吃掉空行（markdown 段落分隔）、三段自有提示词必须
+    # 按字面渲染（0.1.6 interpolate:false / 旧内核 sanitize 兜底）、引用文件超大不注入、
+    # 投影未变化时不重复写 settings。脚本自带两条负向对照（还原缺陷后断言必须报红）。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/prompt.contract.selftest.mjs
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
-    needs: [verify, selftest, auto-resume-contract, anchor-contract]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract]
     # 只有释放事件才发布；push / PR / 手动触发只跑验证门。
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
