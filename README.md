@@ -186,7 +186,7 @@ pnpm verify   # + packaging contract — entry reachability, undeclared imports,
 
 ### Share & Install
 
-Published on **npm** as `dsh-session-toolkit` (v0.1.8, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
+Published on **npm** as `dsh-session-toolkit` (v0.1.9, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
 
 - **npm**: consumers run `dsh plugin --profile web add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
 - **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.

@@ -43,7 +43,7 @@
 | `lib/log-reposition.js` | `491282BF9C233C5449E96C3F203663B59B63A229AA22CEF48E5931E49CD0B03E` | 280 |
 | `client/client.js` | `557F602CFAE96D2523B623564E2F71142BDE15F93FAF6D71321CECC37F33C98F` | 114768 |
 | `package.json` | `EFE1A9DA066929558DD9D655676F8DCFC18C8C3D5FCE9B97260C2799D4D16449` | 1650 |
-| `README.zh.md` | `AA07B1ADED3978904CF09B2970851BD58E3F7B678907481D2B20F04BF2B2170A` | 28382 |
+| `README.zh.md` | `2D6A8BFB11DE199312CFE661F8CBAE7F28D44F4E6CE5CD891B279EEF777D2827` | 28382 |
 | `cordis.patch.yml` | `9CB32E70D0C4C98255D83F7BF7D1D67F0B2803E88676B864D9FA84E4A4C2D826` | 285 |
 
 **为什么锚这 14 个**：它们就是本表用行号引用的全部仓库内文件（2026-09-18 新增 `lib/prompt-literal.js`、`lib/ui-config.js`：二者随本轮修复进入本表）。**`README.md` 未锚**（本表只用行号引 `README.zh.md`；`README.md` 的一致性由 `pnpm verify` 的双语版本断言守）。**`docs/agents/**` 自身不锚**（本表是锚的**持有者**，自锚会自引用）。
@@ -58,7 +58,7 @@
 | `ctx.settings.register(..., { base })`：**base 层是 host→browser 的配置通道**（`config.client` 作为 `session-toolkit-ui` 的 base；client 条目本身拿不到 cordis config） | `lib/ui-config.js:29`（base = `config.client`）、`client/client.js:2041-2058`（client bind + 读取） | `packages/settings/settings/src/index.ts:287`（`mergeLayers`）、`packages/client/modules/src/client/entries.ts:167`（`loader.create({ name })`，无 config） | UI 旋钮（字符上限/超时）**配置无效**，永远走兜底值 |
 | `ctx.systemPrompt.section({ name, order, text, interpolate })` | `lib/identity.js:50`、`lib/global-prompt.js:232,250`（均带 `interpolate: false`）、`lib/prompt-literal.js:20`（旧内核兜底 waterfall） | `packages/core/system-prompt`（0.1.6 起 `PromptSection.interpolate`） | 提示词段消失或顺序错乱（身份→全局→工作区应为 40→50→60）；**旧内核缺兜底则 `{{...}}` 抛错、整轮组装失败** |
 | `ctx.on('system-prompt/assemble', …, next)`（waterfall） | `lib/prompt-dedup.js:19`、`lib/prompt-literal.js:20` | `packages/core/system-prompt` | 提示词去重/按字面渲染静默失效（无报错，只有重复行或花括号被改写） |
-| `ctx.agents.get(id)` / `ctx.agents.resume({ resumeSessionId, agentOptions, setup })` / `ctx.agents.roots()` | `lib/auto-resume.js:112,133`、`lib/global-prompt.js:31` | `dsh-agent/lib/types/index.d.ts:139`（`get` 返回裸 Agent）、`:287`（`resume`）、`:362`（`roots`）、`:110-129`（`ResumeAgentOptions`，形状未变） | 自动上线失效；工作区列表空（**历史根因**：见 `README.zh.md:221` frozen 设置铁律） |
+| `ctx.agents.get(id)` / `ctx.agents.resume({ resumeSessionId, agentOptions, setup })` / `ctx.agents.roots()` | `lib/auto-resume.js:112,133`、`lib/global-prompt.js:31` | `dsh-agent/lib/types/index.d.ts:139`（`get` 返回裸 Agent）、`:287`（`resume`）、`:362`（`roots`）、`:110-129`（`ResumeAgentOptions`，形状未变） | 自动上线失效；工作区列表空（**历史根因**：见 `README.zh.md:231` frozen 设置铁律） |
 | **`ctx.sessionController.resolveAgent(id)`**（0.1.6 起）：官方恢复链路 = composeAgent（`installSelection` + mount preset）+ 归属校验 + 并发去重 | `lib/auto-resume.js:17`（`ctx.inject(['sessionController'], …)`）、`:117`（优先调用） | `packages/api/session-controller/src/index.ts:170`、`src/agent.ts:381`（composeAgent）、`:283`（selectionFor） | 手工 `ctx.agents.resume` 会丢掉会话自己的模型/effort 选择（重启后回落默认模型），并绕开后续官方在 resume 链上追加的步骤 |
 | `ctx.on('session/created', …)` | `lib/global-prompt.js:286` | `packages/core/session` | 工作区回填不触发 |
 | `ctx.effect(fn)`（生命周期绑定） | `lib/identity.js:50`、`lib/global-prompt.js:232,250`、`lib/web-restart.js:30` | `packages/core/scope` | 热重载重复注册 / 卸载残留 |
@@ -71,7 +71,7 @@
 | `ctx.get('agentDefaultModel')` | `lib/auto-resume.js:9` | `packages/core/agent-default-model` | resume 缺少模型选择 |
 | `ctx.get('sessionTitle')` / `ctx.get('workspaceRegistry')`（**调用时惰性读取**，0.1.9 起） | `lib/peer-message.js:27`（title）、`:78`（workspace） | `packages/session/session-title`、`packages/workspace/workspace` | 工具返回退化（标题/工作区名丢失） |
 | `timer` 服务（`inject: ['timer']`） | `lib/web-restart.js:5`、`lib/global-prompt.js:5` | `packages/util/time` | 定时轮询不执行；apply 挂起 |
-| `inject` 服务并集 | `lib/index.js:60-72` | 各 provider 包 | 缺一服务会**拖慢整包 apply**（`README.zh.md:235` 已知限制） |
+| `inject` 服务并集 | `lib/index.js:60-72` | 各 provider 包 | 缺一服务会**拖慢整包 apply**（`README.zh.md:246` 已知限制） |
 | 引用文件读取上限（`maxFileBytes` / `maxTotalBytes`）+ 按 `mtimeMs`/size 缓存 + 投影写入抑制 | `lib/global-prompt.js:53`（读取）、`:69`（单文件上限）、`:105`（写入抑制） | `packages/settings/settings-file/src/index.ts:211`（每次 `update` 都会加锁原子写整份 `settings.yaml`） | 每个模型步一次磁盘写 + 超大文件同步阻塞组装/撑爆提示词 |
 
 **红线（改 host 必读）**：DSH 的 `scope.get()` 返回值被 `deepFreeze`。写入前必须先 `{ ... }` 拷贝（数组 `.slice()`），再 `update()`。这是「工作区列表空」的根因，见 `README.zh.md:221`。
@@ -84,10 +84,10 @@
 | `ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)`（低 priority 遮蔽） | `client/client.js:654,668,669,688,689,1404,1421,1422,1730,1737,1738,1915,1916,1925,1926,2020,2028`（2026-09-18 重核：本次修复只在既有注册点上增删参数，未改注册拓扑） | **由 web shell 以模块表种子提供**：`dsh-web-frontend/dist/assets/index-*.js` 内含 `"@deepseek-ai/dsh-client-ui-slots":<instance>`；`packages/client/ui-slots` 仍在 checkout，但**该 npm 包不在已装 profile 中** | 按钮/设置页整体消失；遮蔽失效则官方 Session log 按钮重现 |
 | `ctx.get('settingsScope').bind({ namespace })` → `{ getSnapshot(); subscribe(); set(field, v); unset(field); mutate(ops, expectedRevision?) }`；snapshot = `{ status:'loading'\|'ready'\|'unavailable', value, base, user, revision, writable, mode }`；**`bind` 不会因命名空间不存在而抛错**（返回 status='unavailable' 的 scope） | `client/client.js:655,656,664,667,788,1405,1406,1414,1416,1418,1420,1507,2041,2042,2044,2058`（`:2041-2058` = `session-toolkit-ui` 绑定与读取） | `dsh-client-ui-settings/lib/types/client/settings-contract.d.ts:34-85`、`settings-scope.d.ts:139`（`bind`）、`:260`（bind 实现：不抛错） | 「Settings service unavailable」——设置页整体空白；UI 旋钮回落兜底值 |
 | `ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)` | `client/client.js:653,660,661,1403,1410,1411,1729,1734,1735,1912,2014,2017,2018` | `packages/client/locale` | UI 文案退回 key；中英切换失真 |
-| `ctx.get('sessionLogDownload')` → controller `{ store, download(id), dismiss(id), dispose() }` | `client/client.js:1932,1936,1939,1945`（配套 host 侧 `lib/log-reposition.js`） | `dsh-session-log-export/lib/types/client/index.d.ts:7`、`controller.d.ts:31-58`；**0.1.6 的官方 UI 已改为「⋯ 更多操作」菜单** | 平移后的 Session log 入口失效（`README.zh.md:233` 已声明风险；官方 UI 改版必须人工同步复刻件） |
+| `ctx.get('sessionLogDownload')` → controller `{ store, download(id), dismiss(id), dispose() }` | `client/client.js:1932,1936,1939,1945`（配套 host 侧 `lib/log-reposition.js`） | `dsh-session-log-export/lib/types/client/index.d.ts:7`、`controller.d.ts:31-58`；**0.1.6 的官方 UI 已改为「⋯ 更多操作」菜单** | 平移后的 Session log 入口失效（`README.zh.md:243` 已声明风险；官方 UI 改版必须人工同步复刻件） |
 | `ctx.effect(fn, label)` | `client/client.js:660,1410,1734,1912,2017,2047`（`:2047` = UI 旋钮订阅） | `packages/core/scope` | locale 重复注册 / UI 旋钮订阅泄漏 |
 | 模块表种子词（`require` 目标） | `client/client.js:41,798,799,1516,1517,1787-1789,1961-1963`（`:1961-1963` 为 peer-message 模块；**已移除 schemastery 的 `try/catch` 导入**） | `packages/client/modules` + `packages/client/tsdown.client.ts`（默认 externals） | 单个 `require` 抛错即该 UI 模块失效 |
-| slot id 集合 | 见 `README.zh.md:62-71` 表（2026-09-18 复核：未变） | `packages/client/ui-settings`、`ui-settings-general`、`ui-conversation` | 对应页面/按钮不出现 |
+| slot id 集合 | 见 `README.zh.md:65-76` 表（2026-09-18 复核：行号按工作区重核） | `packages/client/ui-settings`、`ui-settings-general`、`ui-conversation` | 对应页面/按钮不出现 |
 
 **模块表种子的真实 require 集合**（升级时逐个核）：`react`、`react/jsx-runtime`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`。**2026-09-18 起不再 require `@deepseek-ai/schemastery`**：client 条目拿不到 config，自带 `Config` 也无意义，UI 旋钮改走 `session-toolkit-ui` 命名空间（见 §A）。
 `dsh.client.inject` 是**信息性**边（loading/prefetch 元数据，绝不参与 apply 排序，见 `packages/client/ui-workspace/src/client/index.ts:57`），**不是** npm 依赖声明——不要把它当依赖清单核。
@@ -132,8 +132,8 @@
 | Session log 入口平移到依赖官方 `sessionLogDownload` controller 接口 | `client/client.js:1932`、`lib/log-reposition.js` | 官方改接口即失效，需同步 |
 | **复刻件会随官方 UI 改版漂移**（0.1.6 官方已从胶囊按钮改为「⋯ 更多操作」菜单；2026-09-18 已同步，但仍是被动跟随） | `client/client.js:1855-1905`（组件）、`:1780-1790`（CSS/文案）；漂移探测见 `scripts/dsh-log-ui.drift.mjs`（§D 步骤 8） | 官方 UI 变更后本插件仍渲染旧形态；官方在同一 cell 新增菜单项时还会被遮蔽吞掉 |
 | 遮蔽依赖 cell shadowing 语义（更低 priority 重注册） | `client/client.js:1915-1926` | 遮蔽崩溃时官方条目会优雅回退（abdicate），症状是「按钮重复出现」而非报错 |
-| 重启探测窗口是启发式 | `client/client.js`（`uiCfg.restartFailThreshold`/`uiCfg.restartPollMs`） | relaunch 落在窗口内会误报 `noRestart`（`README.zh.md:237`） |
-| 标题就绪无信号，只能靠 `restartSettleMs` 等待 | `client/client.js` | 会话标题可能 fallback 为工作区名（`README.zh.md:145`） |
+| 重启探测窗口是启发式 | `client/client.js`（`uiCfg.restartFailThreshold`/`uiCfg.restartPollMs`） | relaunch 落在窗口内会误报 `noRestart`（`README.zh.md:248`） |
+| 标题就绪无信号，只能靠 `restartSettleMs` 等待 | `client/client.js` | 会话标题可能 fallback 为工作区名（`README.zh.md:150`） |
 | UI 旋钮依赖 `session-toolkit-ui` 命名空间在 host 侧注册 | `client/client.js:15-40`（兜底值 + `readUiCfg`）、`lib/ui-config.js` | 不可用（host 半未加载 / 远端 memory 模式）时回落冻结兜底值，不报错 |
 | 旧内核缺 `interpolate` 字段时靠 `lib/prompt-literal.js` 兜底 | `lib/prompt-literal.js:20-30` | 兜底缺失 ⇒ 用户文本里的 `{{...}}` 触发未注册变量 → 该轮组装抛错（历史形态） |
 
