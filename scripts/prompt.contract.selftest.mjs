@@ -14,7 +14,7 @@
  * 每条断言都必须能报红：脚本在 os.tmpdir() 的副本上还原历史缺陷（去重吃空行、按字面渲染缺失），
  * 对应断言必须变为失败。副本与临时文件都不落工作区。
  */
-import { cpSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -104,10 +104,44 @@ async function promptChecks(libDir) {
 function copyLib(id) {
   const dir = mkdtempSync(path.join(tmpdir(), 'dsh-st-prompt-' + id + '-'))
   cpSync(path.join(ROOT, 'lib'), path.join(dir, 'lib'), { recursive: true })
+  provideSchemastery(path.join(dir, 'node_modules'))
   return dir
 }
 
-const main = await promptChecks(path.join(ROOT, 'lib'))
+/**
+ * 为临时根准备 `@deepseek-ai/schemastery`：能链到工作区真实包就链（本地开发），
+ * 链不到就放一个最小 schema 桩（CI 不装依赖）。被测断言与 schema 构造无关，
+ * 但 `lib/global-prompt.js` 顶层 import 它——缺它会让门直接 ERR_MODULE_NOT_FOUND。
+ * @param {string} nodeModulesDir 临时根的 node_modules 目录
+ * @returns {'linked'|'stub'}
+ */
+function provideSchemastery(nodeModulesDir) {
+  const real = path.join(ROOT, 'node_modules')
+  if (existsSync(path.join(real, '@deepseek-ai', 'schemastery'))) {
+    try {
+      symlinkSync(real, nodeModulesDir, process.platform === 'win32' ? 'junction' : 'dir')
+      if (existsSync(path.join(nodeModulesDir, '@deepseek-ai', 'schemastery'))) return 'linked'
+    } catch { /* 落回桩 */ }
+  }
+  const stubDir = path.join(nodeModulesDir, '@deepseek-ai', 'schemastery')
+  mkdirSync(stubDir, { recursive: true })
+  writeFileSync(path.join(stubDir, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/schemastery', version: '0.0.0-contract-stub', type: 'module', main: 'index.mjs',
+  }, null, 2))
+  writeFileSync(path.join(stubDir, 'index.mjs'), [
+    'const make = () => new Proxy(function () {}, {',
+    "  get: (_t, key) => (key === 'then' ? undefined : make()),",
+    '  apply: () => make(),',
+    '  construct: () => make(),',
+    '})',
+    'export default new Proxy({}, { get: () => make() })',
+    '',
+  ].join('\n'))
+  return 'stub'
+}
+
+const mainRoot = copyLib('main')
+const main = await promptChecks(path.join(mainRoot, 'lib'))
 check('去重保留空行（跨段不再吃掉段落分隔）', main.blankPreserved)
 check('去重仍删除真正的重复行', main.duplicateRemoved)
 check('去重不动 harness 自有段', main.harnessUntouched)
@@ -162,7 +196,8 @@ function makeGlobalPromptCtx() {
 }
 
 async function globalPromptChecks() {
-  const mod = await import(pathToFileURL(path.join(ROOT, 'lib/global-prompt.js')).href)
+  const root = copyLib('global-prompt')
+  const mod = await import(pathToFileURL(path.join(root, 'lib/global-prompt.js')).href)
   const { ctx, scopes, sections, updates } = makeGlobalPromptCtx()
   mod.apply(ctx, { maxFileBytes: 64, maxTotalBytes: 128 })
 
@@ -194,6 +229,7 @@ async function globalPromptChecks() {
   const lastStatus = updates.length > 0 ? updates[updates.length - 1].patch.byScope.global[0] : undefined
 
   rmSync(dir, { recursive: true, force: true })
+  rmSync(root, { recursive: true, force: true })
   return {
     literal: globalSection.interpolate === false,
     noSanitize: first === 'Base\nhello {{braces}}',
@@ -212,6 +248,7 @@ check('超大文件判 fail 且不注入', gp.oversized)
 
 rmSync(negDedupDir, { recursive: true, force: true })
 rmSync(negLiteralDir, { recursive: true, force: true })
+rmSync(mainRoot, { recursive: true, force: true })
 
 console.log('')
 console.log(`共 ${total.count} 条：通过 ${total.count - failures.length}，失败 ${failures.length}`)

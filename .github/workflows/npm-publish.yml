@@ -76,12 +76,15 @@ jobs:
     permissions:
       contents: read
     steps:
+      # 本门用 git cat-file 取「引入修复的那个提交的父版本」作负向对照，
+      # 因此**需要完整历史**：默认 fetch-depth: 1 只有 HEAD，`rev^` 不可读会让门以
+      # exit 3（未完成验证）报红——这正是它此前在 CI 上长期红着的第二个原因。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # 本门用 git cat-file HEAD:lib/auto-resume.js 取旧版本作负向对照；
-      # actions/checkout 默认 fetch-depth: 1 已含 HEAD 的 blob，无需改动。
       - run: node scripts/auto-resume.contract.selftest.mjs
 
   anchor-contract:

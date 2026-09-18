@@ -115,13 +115,42 @@ assertOutsideWorkspace(WORK, '自测工作目录')
 const sha256 = (p) => createHash('sha256').update(readFileSync(p)).digest('hex').toUpperCase().slice(0, 16)
 
 /** 被测模块是 ESM，`import '@deepseek-ai/schemastery'` 需要能解析——在临时目录建工作区 node_modules 链接。 */
-function linkNodeModules() {
+/**
+ * 为临时副本准备 `@deepseek-ai/schemastery`。
+ *
+ * 本门断言的是「哪些会话被选中」，与 schema 构造无关；因此优先链接工作区里真实的包
+ * （本地开发），**不可解析时退化为最小 schema 桩**（CI 不装依赖）。此前缺依赖直接
+ * exit 3，导致这条门在 CI 上从未真正执行（f336ca7 的红就是这个形态）——「跳过」被
+ * 误读成「契约成立」，正是本仓库反复强调的静默失效。
+ * @returns {'linked'|'stub'|false}
+ */
+function provideSchemastery() {
   const link = path.join(WORK, 'node_modules')
   const target = path.join(ROOT, 'node_modules')
-  if (!existsSync(target)) return false
+  if (existsSync(path.join(target, '@deepseek-ai', 'schemastery'))) {
+    try {
+      symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+      if (existsSync(path.join(link, '@deepseek-ai', 'schemastery'))) return 'linked'
+    } catch { /* 落回桩 */ }
+  }
+  // 最小 schema 桩：z.object/z.dict/z.number/... 全部返回可继续链式调用（含 .default）的对象，
+  // 被测代码只把它交给 settings.register（本门的 ctx 忽略 schema）。
+  const stubDir = path.join(link, '@deepseek-ai', 'schemastery')
   try {
-    symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir')
-    return existsSync(path.join(link, '@deepseek-ai', 'schemastery'))
+    mkdirSync(stubDir, { recursive: true })
+    writeFileSync(path.join(stubDir, 'package.json'), JSON.stringify({
+      name: '@deepseek-ai/schemastery', version: '0.0.0-contract-stub', type: 'module', main: 'index.mjs',
+    }, null, 2))
+    writeFileSync(path.join(stubDir, 'index.mjs'), [
+      'const make = () => new Proxy(function () {}, {',
+      "  get: (_t, key) => (key === 'then' ? undefined : make()),",
+      '  apply: () => make(),',
+      '  construct: () => make(),',
+      '})',
+      'export default new Proxy({}, { get: () => make() })',
+      '',
+    ].join('\n'))
+    return 'stub'
   } catch {
     return false
   }
@@ -354,9 +383,13 @@ if (!existsSync(requestedPath)) {
   console.error(`前置条件不成立：被测代码不存在 ${requestedPath}`)
   process.exit(EXIT.INCOMPLETE)
 }
-if (!linkNodeModules()) {
-  console.error('前置条件不成立：无法为临时副本建立 node_modules 链接（@deepseek-ai/schemastery 不可解析）')
+const schemasterySource = provideSchemastery()
+if (schemasterySource === false) {
+  console.error('前置条件不成立：既无法链接也无法为临时副本放置 @deepseek-ai/schemastery 桩')
   process.exit(EXIT.INCOMPLETE)
+}
+if (schemasterySource === 'stub') {
+  console.log('note  @deepseek-ai/schemastery 不可解析（CI 不装依赖）：使用最小 schema 桩；本门断言与 schema 构造无关。')
 }
 const codePath = stageCode(requestedPath)
 
