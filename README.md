@@ -4,7 +4,7 @@
 
 A consolidated plugin toolkit for the **DeepSeek Harness**. Six previously separate local plugins — **session identity**, **global prompt**, **session auto-resume**, **web restart service**, **Session-log button relocation**, and **peer-session messaging** — merged into a single installable package that ships in the official bundle form (`dsh.bundle.patch`) and installs with `dsh plugin add`; it also includes a **Prompt Dedup** feature.
 
-Current version: **0.1.9**, verified against **DeepSeek Harness `dsh-v0.1.6-alpha.2`** (older kernels keep working through the fallbacks noted below).
+Current version: **0.1.10**, verified against **DeepSeek Harness `dsh-v0.1.6-alpha.2`** (older kernels keep working through the fallbacks noted below).
 
 ---
 
@@ -35,6 +35,19 @@ The client probes `GET /api/restart` on mount and hides the entry when the host 
 
 ### Session-Log Button Relocation
 Shadows the official entry in `conversation.session.header.utilities` (same id `session-log-download`, priority −1, cell-shadowing) and registers a copy in `conversation.session.header.actions` (id `session-log-download-moved`, order 41), reusing the official `sessionLogDownload` controller (`ctx.get('sessionLogDownload')`) so download behavior stays identical to stock. The copy mirrors the **0.1.6** official surface — a "⋯ More actions" menu whose single item triggers the shared download dialog (localized through this plugin's own locale namespace) — and is a frozen replica: a stock upgrade that changes that UI must be synced by hand, and the shadowing registration must be re-checked whenever the official entry gains new menu items.
+
+### Session Admin
+The host plane registers two more tools on the **same plane as `send_to_session` / `list_sessions`**:
+
+- **`create_session`** — create a new top-level session (a chat window in the GUI's left navigation). **Both `cwd` and `prompt` are required**: `cwd` must be an absolute path (a session without `cwd` never enters the host list) and `prompt` is the new session's first message. A successful create produces a real user message (**it genuinely runs one model turn and consumes one call**); by kernel design any session with events is persisted, so **this tool deliberately offers no "register-only, never speaks" ephemeral session**. An optional `title` sets the title immediately and pins it. The result carries `sessionId`, `cwd`, `status`, `title` and `notes`.
+- **`rename_session`** — retitle a **live** session. A rename **pins** the title so automatic title generation no longer overwrites it. The target must be a top-level session and currently live: a subagent target (`origin=subagent` or `delegationDepth>0`) is refused explicitly rather than silently rewritten.
+
+Both return **structured results** and **never throw an uncaught exception from the tool body**: success is `{ ok: true, … }`, failure is `{ ok: false, error: '<code>', errorText: '<original reason>' }`. Codes: `EMPTY_CWD` / `CWD_NOT_ABSOLUTE` / `EMPTY_PROMPT` / `PROMPT_TOO_LONG` / `PRESET_RESOLVE_FAILED` / `CREATE_FAILED` / `CREATE_UNAVAILABLE` / `CREATE_NO_AGENT` / `EMPTY_TARGET` / `EMPTY_TITLE` / `SESSION_UNAVAILABLE` / `TARGET_IS_SUBAGENT` / `TITLE_SERVICE_UNAVAILABLE` / `UNEXPECTED`.
+(A missing `prompt` is rejected by the kernel's tool-argument validation at the **framework layer** — the kernel turns that into a tool-error result, and the exception never passes through this plugin's code; only a `prompt` that is present but blank is answered with this plugin's `EMPTY_PROMPT`. Neither creates a session.)
+
+**Two honest disclosures**:
+- **Visibility is not verified inside the tool** — whether a session created with `prompt` actually appears in the left navigation depends on the kernel **genuinely starting a turn** (navigation filters on the "blank session" bit, which only flips on `turn/start`; `followup` merely enqueues and wakes the driver). The result therefore draws **no** "it is in the navigation" conclusion, and `notes` says so.
+- **Preset degradation** — when the `agentPresets` service exists but default-preset resolution fails, the tool **returns `PRESET_RESOLVE_FAILED` instead of handing back a crippled session with no preset mounted**; when the service is absent entirely that is a legitimate degradation, and the session is still created with an explanatory `notes` entry.
 
 ### Peer Messaging
 `send_to_session` / `list_sessions` tools on the host plane (session addressing by id or workspace path, wakeup delivery) plus a "copy session ID" button in both `conversation.session.header.actions` (id `copy-session-id`, order 30) and `conversation.input.left` (id `copy-session-id-input`, order 30). Outgoing message content is converted to plain text (`toPlainText`) before delivery so recipients see tidy text rather than raw markdown.
@@ -186,7 +199,9 @@ pnpm verify   # + packaging contract — entry reachability, undeclared imports,
 
 ### Share & Install
 
-Published on **npm** as `dsh-session-toolkit` (v0.1.9, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
+Published on **npm** as `dsh-session-toolkit` (**latest published version: v0.1.8**, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
+
+> **This repository is ahead of the published package.** npm publishing is currently **paused**, so the session-management tools (`create_session` / `rename_session`) described above are **not yet in any published version** — installing from npm today gives you 0.1.8, which does not contain them. To use them now, install from this checkout or from GitHub (`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`).
 
 - **npm**: consumers run `dsh plugin --profile web add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
 - **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.
@@ -221,7 +236,7 @@ Each section's rendered text is a fixed part of the request prefix while its set
 
 ### Tool surface
 
-`send_to_session` and `list_sessions` are registered on the host plane and visible to every session (subagents inherit them through the standing preset composition). Their arguments and results are JSON-compatible.
+`send_to_session`, `list_sessions`, `create_session` and `rename_session` are registered on the host plane and visible to every session (subagents inherit them through the standing preset composition). Their arguments and results are JSON-compatible. **All four are exposed to the model**, so `create_session`'s semantic consequence — creating one produces a real user message and consumes one model call — is model-visible.
 
 ---
 

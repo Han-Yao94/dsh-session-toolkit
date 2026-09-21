@@ -4,7 +4,7 @@
 
 DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Web 重启服务、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
 
-当前版本:**0.1.9**,已对照 **DeepSeek Harness `dsh-v0.1.6-alpha.2`** 验证(更早内核靠下文两处兜底继续可用)。
+当前版本:**0.1.10**,已对照 **DeepSeek Harness `dsh-v0.1.6-alpha.2`** 验证(更早内核靠下文两处兜底继续可用)。
 
 ---
 
@@ -35,6 +35,19 @@ client 挂载时探测 `GET /api/restart`,host 回报 `available: false`(不支�
 
 ### Session log 按钮平移(Session-Log Button Relocation)
 遮蔽 `conversation.session.header.utilities` 中的官方条目(同 id `session-log-download`,priority −1,cell shadowing),并在 `conversation.session.header.actions` 注册副本(id `session-log-download-moved`,order 41),复用官方 `sessionLogDownload` controller(`ctx.get('sessionLogDownload')`),下载行为与官方一致。副本对齐 **0.1.6** 的官方形态——「⋯ 更多操作」菜单(单条「下载 Session 日志」)触发共享对话框(文案走本插件自己的 locale 命名空间);它是**冻结的复刻件**:官方改版必须人工同步,官方条目新增菜单项时也要重新核对遮蔽策略。
+
+### 会话管理(Session Admin)
+host 平面另注册两个工具,**与 `send_to_session` / `list_sessions` 同平面**:
+
+- **`create_session`** —— 自主创建一个新的顶层会话(GUI 左侧导航里的一个聊天窗口)。**`cwd` 与 `prompt` 均必填**:`cwd` 必须是绝对路径(无 `cwd` 的会话不会进宿主列表),`prompt` 是新会话的首条消息。创建成功即产生一条真实用户消息(**会真实跑一轮模型、消耗一次调用**);按内核设计,产生过事件的会话会被持久化,因此**本工具不提供「只登记、不说话」的临时会话**。可选 `title` 会立即设定标题并 pin 住。返回体含 `sessionId`、`cwd`、`status`、`title` 与 `notes`。
+- **`rename_session`** —— 修改一个**在线(live)**会话的标题。改名会 **pin 住标题**,不再被自动标题生成覆盖。目标必须是顶层会话且当前在线:目标是子会话(`origin=subagent` 或 `delegationDepth>0`)时明确拒绝,不静默改写。
+
+两者都以**结构化结果**返回(**工具执行本身不抛未捕获异常**):成功 `{ ok: true, … }`,失败 `{ ok: false, error: '<码>', errorText: '<原始原因>' }`。错误码:`EMPTY_CWD` / `CWD_NOT_ABSOLUTE` / `EMPTY_PROMPT` / `PROMPT_TOO_LONG` / `PRESET_RESOLVE_FAILED` / `CREATE_FAILED` / `CREATE_UNAVAILABLE` / `CREATE_NO_AGENT` / `EMPTY_TARGET` / `EMPTY_TITLE` / `SESSION_UNAVAILABLE` / `TARGET_IS_SUBAGENT` / `TITLE_SERVICE_UNAVAILABLE` / `UNEXPECTED`。
+(`prompt` 缺失由内核工具参数校验在**框架层**拒绝——内核把它转成工具错误结果，该异常不经本插件代码；`prompt` 传了但纯空白才由本插件返回 `EMPTY_PROMPT`。两者都不创建会话。)
+
+**两处如实声明**:
+- **可见性未在工具内验证** —— 「带 `prompt` 建出的会话会出现在左侧导航」取决于内核是否**真正开跑一轮**(导航按「空白会话」判据过滤,该状态只在 `turn/start` 时翻转;`followup` 只是入队并唤醒驱动)。因此返回体**不下**「已出现在导航」的结论,`notes` 会写明这一点。
+- **preset 降级** —— `agentPresets` 服务存在但默认 preset 解析失败时,工具**返回 `PRESET_RESOLVE_FAILED`,而不是交付一个没有 preset 的残缺会话**;服务整体缺失属合法降级,会话照建并带说明性 `notes`。
 
 ### 会话间消息(Peer Messaging)
 host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区路径寻址会话、wakeup 投递),并在 `conversation.session.header.actions`(id `copy-session-id`,order 30)与 `conversation.input.left`(id `copy-session-id-input`,order 30)各加「复制会话 ID」按钮。发出消息内容在投递前经 `toPlainText` 转为纯文本,接收方看到整洁文本而非原始 markdown。
@@ -186,7 +199,9 @@ pnpm verify   # 另加打包契约 —— 入口可达、import 声明完整、�
 
 ### 分享与安装
 
-已发布至 **npm**(`dsh-session-toolkit`,v0.1.9,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+已发布至 **npm**(`dsh-session-toolkit`,**最新已发布版本 v0.1.8**,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+
+> **本仓库领先于已发布包。** npm 发布当前**处于暂停**,因此上文介绍的会话管理工具(`create_session` / `rename_session`)**尚未进入任何已发布版本**——今天从 npm 安装得到的是 0.1.8,其中不含这两个工具。要现在使用,请从本 checkout 或 GitHub 安装(`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`)。
 
 - **npm**:消费者 `dsh plugin --profile web add dsh-session-toolkit` 安装;新版本通过 `npm publish`(或 `pnpm publish`)发布。
 - **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
@@ -221,7 +236,7 @@ node scripts/dsh-log-ui.drift.mjs --harness <deepseek-harness 路径>          #
 
 ### 工具面
 
-`send_to_session` 与 `list_sessions` 在 host 平面注册,所有会话可见(subagent 经常驻 preset 组装继承)。参数与返回均为 JSON 兼容。
+`send_to_session`、`list_sessions`、`create_session` 与 `rename_session` 在 host 平面注册,所有会话可见(subagent 经常驻 preset 组装继承)。参数与返回均为 JSON 兼容。**四个工具都会向模型暴露**,因此 `create_session` 的语义后果(创建即产生一条真实用户消息并消耗一次模型调用)对模型是可见的。
 
 ---
 
