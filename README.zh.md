@@ -42,7 +42,7 @@ host 平面另注册两个工具,**与 `send_to_session` / `list_sessions` 同�
 - **`create_session`** —— 自主创建一个新的顶层会话(GUI 左侧导航里的一个聊天窗口)。**`cwd` 与 `prompt` 均必填**:`cwd` 必须是绝对路径(无 `cwd` 的会话不会进宿主列表),`prompt` 是新会话的首条消息。创建成功即产生一条真实用户消息(**会真实跑一轮模型、消耗一次调用**);按内核设计,产生过事件的会话会被持久化,因此**本工具不提供「只登记、不说话」的临时会话**。可选 `title` 会立即设定标题并 pin 住。返回体含 `sessionId`、`cwd`、`status`、`title` 与 `notes`。
 - **`rename_session`** —— 修改一个**在线(live)**会话的标题。改名会 **pin 住标题**,不再被自动标题生成覆盖。目标必须是顶层会话且当前在线:目标是子会话(`origin=subagent` 或 `delegationDepth>0`)时明确拒绝,不静默改写。
 
-两者都以**结构化结果**返回(**工具执行本身不抛未捕获异常**):成功 `{ ok: true, … }`,失败 `{ ok: false, error: '<码>', errorText: '<原始原因>' }`。错误码:`EMPTY_CWD` / `CWD_NOT_ABSOLUTE` / `EMPTY_PROMPT` / `PROMPT_TOO_LONG` / `PRESET_RESOLVE_FAILED` / `CREATE_FAILED` / `CREATE_UNAVAILABLE` / `CREATE_NO_AGENT` / `EMPTY_TARGET` / `EMPTY_TITLE` / `SESSION_UNAVAILABLE` / `TARGET_IS_SUBAGENT` / `TITLE_SERVICE_UNAVAILABLE` / `UNEXPECTED`。
+两者都以**结构化结果**返回(**工具执行本身不抛未捕获异常**):成功 `{ ok: true, … }`,失败 `{ ok: false, error: '<码>', errorText: '<原始原因>' }`。错误码:`MODEL_UNAVAILABLE` / `MODEL_SELECTION_FAILED` / `MODEL_SELECTION_INVALID` / `EMPTY_CWD` / `CWD_NOT_ABSOLUTE` / `EMPTY_PROMPT` / `PROMPT_TOO_LONG` / `PRESET_RESOLVE_FAILED` / `CREATE_FAILED` / `CREATE_UNAVAILABLE` / `CREATE_NO_AGENT` / `EMPTY_TARGET` / `EMPTY_TITLE` / `SESSION_UNAVAILABLE` / `TARGET_IS_SUBAGENT` / `TITLE_SERVICE_UNAVAILABLE` / `UNEXPECTED`。
 (`prompt` 缺失由内核工具参数校验在**框架层**拒绝——内核把它转成工具错误结果，该异常不经本插件代码；`prompt` 传了但纯空白才由本插件返回 `EMPTY_PROMPT`。两者都不创建会话。)
 
 **两处如实声明**:
