@@ -11,7 +11,7 @@ DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件
 ## 功能
 
 ### 会话身份(Session Identity)
-每会话人设提示词注入该会话系统提示词(独立段 `session-identity`,order 40,每次组装按 agent 求值),支持默认身份与每会话覆盖。UI:身份浮层(启用开关、4000 字符软上限、保存/重置、编辑默认身份、继承默认身份)及双入口状态按钮:`conversation.session.header.actions`(id `session-identity`,order 40)与 `conversation.input.left`(id `session-identity-input`,order 40)。
+每会话人设提示词注入该会话系统提示词(独立段 `session-identity`,order 40,每次组装按 agent 求值),支持默认身份与每会话覆盖。UI:身份浮层(启用开关、4000 字符软上限、保存/重置、编辑默认身份、继承默认身份)及双入口状态按钮:`conversation.session.header.actions`(id `session-identity`,order 40)与 `conversation.input.left`(id `session-identity-input`,order 40)。浮层卡片可按**标题行拖动**:位移每次移动都被钳制在视口内、窗口缩放时重新钳制;卡片比视口大时**每个轴都仍可移动**,四个边都能拖到。位置不持久化,浮层关闭即复位。
 
 ### 全局提示词(Global Prompt)
 设置页(`settings.section`,id `global-prompt`,order 30),以 **Tabs(全局 / 按工作区)** 渲染。*全局* Tab 注入一段作用于所有会话系统提示词的文本(段 `global-prompt`,order 50);*按工作区* Tab 注入按工作区提示词(段 `workspace-prompt`,order 60)。两个段都以 **`interpolate: false`** 注册:提示词文本与引用文件里的 `{{...}}` 一律按字面保留,用户内容永不被改写,未注册的 `{{name}}` 也不可能让组装失败。0.1.6 之前的内核没有分段的 `interpolate` 开关,由 `lib/prompt-literal.js` 在组装结果上退化为 `{` 连续串空格化。

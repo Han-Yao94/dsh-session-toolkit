@@ -631,13 +631,202 @@ window.__ModuleLoader__.load({
       toast ? React.createElement(SiToast, { toast: toast }) : null);
   }
 
+  // ===== 浮层拖动（裁定 #12 / #13）=====
+  // 手柄是标题行 .si-title-row：卡片内还有 textarea 与若干按钮，整卡拖动会与文本选择、
+  // 按钮点击冲突。位移用 transform: translate，不动 .si-mask 的 flex 布局（遮罩是全屏的，
+  // 且它可能被其它地方复用）。位置是一过性 UI 状态，随浮层关闭复位，不持久化。
+  // ⚠️ .si-mask 的垂直位置由 `padding:9vh 24px 24px` + `align-items:flex-start` 共同决定，
+  // 改这两个值就会改变卡片的初始 rect，也就是本段钳制算式的输入基准——改动前先看这里。
+  //
+  // 钳制的基准问题：rect 读取时已经含当前 translate，直接相加会重复计算。本实现对「静止」
+  // 和「拖动中」用同一套算式——因为 k = 本次 rect − 本次已应用的 d 等于布局位置（translate
+  // 不改变布局位置，这一点由 offsetLeft/offsetTop 恒定为 0 独立印证），故对本次 rect 做钳制
+  // 等于对布局位置做钳制。拖动会话期间 rect 是冻结的，因此在会话内也能用同一算式直接钳制。
+  //
+  // 单轴区间（裁定 #13 的核心）：对一条轴，令
+  //   lo = -rect.left                     「贴住起始边」所需的平移量
+  //   hi = vw - rect.right                「贴住终止边」所需的平移量
+  // 装得下时 lo <= 0 <= hi ⇒ 区间取 [lo, hi]：卡片完全在视口内，两端都够得到。
+  //
+  // 装不下（max-height:100vh + overflow:auto，缩窗后出现）时 hi < lo：左右两个「贴边」要求
+  // 不可能同时满足，此时**不能任取其一**——
+  //   · 只取 lo ⇒ 终止边永远够不到（#12 的缺陷：双维溢出下底部 361px 永久不可达）；
+  //   · 只取 hi ⇒ 起始边够不到。
+  // 退役化为「起始边始终可见（lo 兜底），终止边则必须能拖到 vw 处」：
+  //   d ∈ [min(lo, hi), max(lo, hi)]  ⇒  可达像素 = |hi - lo| = 卡片尺寸 - 视口尺寸（同轴）
+  // 注意低端是 **min(lo, hi)** 而非 lo：hi < lo 时取值区间要覆盖两端（hi 是较大的那个负数），
+  // 写成 `[lo, max(lo, hi)]` 会退化成 [lo, lo]（这正是本裁定第一版补丁的错误）。
+  // 副作用：卡片比视口大时它可以被拖出视口一部分——这是「够得到另一端」的必要代价，
+  // 且起始边永远 ≥ 0，卡片不会被推出视口、拖不回来。
+  function siClampAxis(lo, hi, v) {
+    return v < lo ? lo : (v > hi ? hi : v);
+  }
+  function siClamp(dx, dy, rect) {
+    if (!rect) return { dx: dx, dy: dy };
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    // 装不下时区间取 [min, max]：起始边可见由 min 兜住，终止边可达由 max 兜住。
+    if (rect.left + rect.width > vw) {
+      var hlo = -rect.left;
+      var hhi = -(rect.left + rect.width - vw);
+      dx = siClampAxis(Math.min(hlo, hhi), Math.max(hlo, hhi), dx);
+    } else {
+      dx = siClampAxis(-rect.left, vw - rect.right, dx);
+    }
+    if (rect.top + rect.height > vh) {
+      var vlo = -rect.top;
+      var vhi = -(rect.top + rect.height - vh);
+      dy = siClampAxis(Math.min(vlo, vhi), Math.max(vlo, vhi), dy);
+    } else {
+      dy = siClampAxis(-rect.top, vh - rect.bottom, dy);
+    }
+    return { dx: dx, dy: dy };
+  }
+
+  // 标题行内可能有按钮。若用户按在按钮上并发生了拖动，松手时浏览器会补一次 click，
+  // 那不是「点击」而是拖动残留。以拖动距离（>4px）判定并吞掉那一次 click——
+  // 未移动就松手 ⇒ 不拦截，按钮行为完全不变（AC50）。
+  function siSwallowNextClick() {
+    var swallow = function (ev) {
+      ev.stopPropagation();
+      ev.preventDefault();
+      remove();
+    };
+    var remove = function () {
+      document.removeEventListener('click', swallow, true);
+      window.clearTimeout(timer);
+    };
+    var timer = window.setTimeout(remove, 400);
+    document.addEventListener('click', swallow, true);
+  }
+
   function SiFrame(props) {
+    var useState = React.useState;
+    var useEffect = React.useEffect;
+    var useRef = React.useRef;
+    var cardRef = useRef(null);
+    // rectForClamp：静止时 = 布局矩形（每次渲染重新量），拖动会话期间 = 会话开始时冻结的矩形。
+    var posRef = useRef({ dx: 0, dy: 0, rectForClamp: null });
+    var sessionRef = useRef(null);
+    var posState = useState({ dx: 0, dy: 0 });
+    var pos = posState[0];
+    var setPos = posState[1];
+    var dragState = useState(false);
+    var dragging = dragState[0];
+    var setDragging = dragState[1];
+
+    useEffect(function () {
+      return function () {
+        // 卸载（浮层关闭）时必须摘掉挂在 window 上的监听，否则会泄漏到下一次打开。
+        var ses = sessionRef.current;
+        if (ses) {
+          window.removeEventListener('mousemove', ses.onMove, true);
+          window.removeEventListener('mouseup', ses.onUp, true);
+          sessionRef.current = null;
+        }
+      };
+    }, []);
+
+    // 静止时把量到的布局矩形写进 posRef，供 resize 钳制使用；拖动会话期间不覆盖（会话已冻结 rect）。
+    if (!dragging) {
+      var cardEl = cardRef.current;
+      posRef.current.rectForClamp = cardEl ? cardEl.getBoundingClientRect() : posRef.current.rectForClamp;
+      posRef.current.dx = pos.dx;
+      posRef.current.dy = pos.dy;
+    }
+
+    // 缩窗后必须重新钳制，否则卡片可能落到视口外、再也拖不回来。
+    useEffect(function () {
+      var onResize = function () {
+        var rect = posRef.current.rectForClamp;
+        if (!rect) return;
+        var c = siClamp(posRef.current.dx, posRef.current.dy, rect);
+        if (c.dx === posRef.current.dx && c.dy === posRef.current.dy) return;
+        posRef.current.dx = c.dx;
+        posRef.current.dy = c.dy;
+        setPos({ dx: c.dx, dy: c.dy });
+      };
+      window.addEventListener('resize', onResize);
+      return function () { window.removeEventListener('resize', onResize); };
+    }, []);
+
+    function onTitleMouseDown(e) {
+      if (e.button !== 0) return;
+      // 手柄内的按钮/链接不参与拖动（它们的 click 照旧）。
+      var el = e.target;
+      while (el && el !== e.currentTarget) {
+        var tag = el.tagName;
+        if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        el = el.parentNode;
+      }
+      var card = cardRef.current;
+      if (!card) return;
+      var rect = card.getBoundingClientRect();
+      var startX = e.clientX;
+      var startY = e.clientY;
+      var moved = false;
+      var ses = {
+        onMove: function (ev) {
+          var rawX = ev.clientX - startX;
+          var rawY = ev.clientY - startY;
+          if (!moved && Math.abs(rawX) + Math.abs(rawY) > 4) moved = true;
+          var c = siClamp(rawX, rawY, rect);
+          if (c.dx === posRef.current.dx && c.dy === posRef.current.dy) return;
+          posRef.current.dx = c.dx;
+          posRef.current.dy = c.dy;
+          posRef.current.rectForClamp = rect;
+          setPos({ dx: c.dx, dy: c.dy });
+          // 阻止拖动期间的文本选择与图片/链接拖拽。
+          ev.preventDefault();
+        },
+        onUp: function (ev) {
+          window.removeEventListener('mousemove', ses.onMove, true);
+          window.removeEventListener('mouseup', ses.onUp, true);
+          sessionRef.current = null;
+          setDragging(false);
+          if (moved) siSwallowNextClick();
+          ev.preventDefault();
+        },
+      };
+      sessionRef.current = ses;
+      setDragging(true);
+      window.addEventListener('mousemove', ses.onMove, true);
+      window.addEventListener('mouseup', ses.onUp, true);
+      // 从手柄起手即禁选，避免「按下—微动」就开始划词。
+      e.preventDefault();
+    }
+
+    // 手柄注入：只给标题行挂 onMouseDown 与 grab 光标，卡片本身的 props 契约不变。
+    // ⚠️ AC51 的负向对照点就是这里——把判定从 .si-title-row 改成 .si-card 即「整卡拖动」形态。
+    var handleStyle = { cursor: dragging ? 'grabbing' : 'grab' };
+    var withHandle = function (child) {
+      if (!React.isValidElement(child) || child.props.className !== 'si-title-row') return child;
+      return React.cloneElement(child, { onMouseDown: onTitleMouseDown, style: handleStyle });
+    };
+    var kids = props.children;
+    var framed = Array.isArray(kids)
+      ? kids.map(withHandle)
+      : withHandle(kids);
+
     return React.createElement('div', {
       className: 'si-mask',
-      onMouseDown: function (e) { if (e.target === e.currentTarget) props.onClose(); },
+      style: dragging ? { userSelect: 'none' } : null,
+      onMouseDown: function (e) {
+        // 拖动会话期间不因遮罩点击而关闭（拖动从手柄起手本来就不命中 e.currentTarget，
+        // 这里是兜底：万一指针事件在遮罩上重新落点）。
+        if (sessionRef.current) return;
+        if (e.target === e.currentTarget) props.onClose();
+      },
     },
-      React.createElement('div', { className: 'si-card', tabIndex: -1, onKeyDown: props.onKeyDown, role: 'dialog', 'aria-modal': true },
-        props.children));
+      React.createElement('div', {
+        ref: cardRef,
+        className: 'si-card',
+        tabIndex: -1,
+        onKeyDown: props.onKeyDown,
+        role: 'dialog',
+        'aria-modal': true,
+        style: { transform: 'translate(' + pos.dx + 'px, ' + pos.dy + 'px)' },
+      }, framed));
   }
 
   function SiToast(props) {
@@ -720,7 +909,7 @@ window.__ModuleLoader__.load({
     '.si-card{width:680px;max-width:100%;max-height:100vh;overflow:auto;display:flex;flex-direction:column;gap:18px;background:var(--dsw-alias-bg-layer-1);border:0;border-radius:12px;box-shadow:var(--dsw-elevation-panel);padding:24px 28px;box-sizing:border-box;color:var(--dsw-alias-label-primary);font-size:14px;line-height:1.6;animation:si-in .18s ease;outline:none}',
     '.si-card>*{flex-shrink:0}',
     '.si-head{display:flex;flex-direction:column;gap:6px}',
-    '.si-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
+    '.si-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:grab;user-select:none}',
     '.si-title-group{display:flex;align-items:center;gap:8px;min-width:0;color:var(--dsw-alias-label-primary)}',
     '.si-title{margin:0;font-size:18px;font-weight:600;line-height:1.3}',
     '.si-back,.si-close{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .15s ease,color .15s ease}',

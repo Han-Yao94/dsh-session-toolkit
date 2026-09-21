@@ -30,7 +30,9 @@
   "type": "module",
   "scripts": {
     "check": "node scripts/verify.mjs syntax",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "assert:clamp": "node scripts/clamp-call.assert.mjs",
+    "assert:clamp:selftest": "node scripts/clamp-call.assert.mjs --selftest"
   },
   "main": "lib/index.js",
   "exports": {
