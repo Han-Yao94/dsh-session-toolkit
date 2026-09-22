@@ -189,7 +189,12 @@ function makeGlobalPromptCtx() {
   const sections = []
   const routes = []
   const workspaceWrites = []
+  // ⚠️ 假 webServer **必须带 `host`**：守卫的签名是 `originGuard(req, res, webServer.host)`，
+  //    真实宿主（`packages/host/webserver`）一定有这个 getter。假对象若没有它，
+  //    被测代码就会按"没有绑定信息"的形态跑 ⇒ 测的不是真实部署。（缺省时守卫按 loopback fail-closed，
+  //    那是安全侧默认，但**不等于**真实宿主的行为。）
   const webServer = {
+    host: '127.0.0.1',
     register(spec) {
       routes.push(spec)
       return () => {}
@@ -225,7 +230,13 @@ function readStateText(routes) {
     writeHead() { return res },
     end(text) { body = text },
   }
-  route.handler({ method: 'GET' }, res)
+  // ⚠️ 假请求**必须像真请求一样带 Host**（Origin 守卫上线后，Host 是判定来源的一部分）：
+  //    `lib/request-guard.js` 的栅栏 A 在绑定为 loopback 时要求 Host 是 loopback 字面量，
+  //    且缺 Host 一律 403（fail-closed，合法 HTTP/1.1 必须带 Host）。
+  //    这里照**真实同源 GET** 的形状：只带 Host，不带 Origin（浏览器对同源 GET 通常不发 Origin）。
+  //    真实世界里 `route.handler` 只会被 HTTP 服务器调用，`req.headers` 必然是对象 ⇒ 这不是在迁就实现，
+  //    而是让假请求不再模拟一个**不可能发出的**请求。
+  route.handler({ method: 'GET', headers: { host: '127.0.0.1:3080' } }, res)
   return body
 }
 
