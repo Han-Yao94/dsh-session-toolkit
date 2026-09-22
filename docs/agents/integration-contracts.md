@@ -34,16 +34,17 @@
 |---|---|---|
 | `lib/index.js` | `CAAC5D14A6AF201328C3FE054D89259CD3BF99FD5B58D3649C375A7F88A88FFA` | 5903 |
 | `lib/identity.js` | `87522FC6863EE9E5FE6459906AE335AA09966E09891CC76323B3DAD5F7CF273E` | 2980 |
-| `lib/global-prompt.js` | `045736F6072A812467247005A226AA09037339AF6028F2666F495C493452A8DC` | 14250 |
+| `lib/global-prompt.js` | `F5ED7AFD8110932C3CE1063B5F8DC8FCFDA199C25A5428483360475582CF0487` | 14706 |
 | `lib/auto-resume.js` | `8BC2376B9DEDCE352C7A4C7A7E35F46BF3FC7A11E33E9C4A7DE0BD9D828AE4CF` | 10648 |
 | `lib/prompt-dedup.js` | `0590106A4333C5E8EB8F0D122211FD92C8660506D65244ABA9B5499E56FF2EB2` | 3055 |
 | `lib/prompt-literal.js` | `8DFA38720ABE9DC93ED8D4ECC79E3B170452FE036724EBC16E51DBA14503721C` | 1871 |
-| `lib/web-restart.js` | `D1C277841A2A9BDB9205EC2B45128020B00907F30C5101A96D65C4A13D5B6C14` | 8880 |
+| `lib/web-restart.js` | `48CA17C5C1A540DBE65AC218D7C17CFFB0E0BE4CBD0B1E5B6963C11846C7BDFC` | 9360 |
+| `lib/request-guard.js` | `4BDF700894955A076CD1A95D8C1EB5D1FEB952C0EA78443A72639CCD3B32FCAE` | 9573 |
 | `lib/peer-message.js` | `EBF60728A44BEF2314561C6DBC83C85859F2627D1E2E9C675F2756B468E0B80C` | 7257 |
 | `lib/log-reposition.js` | `491282BF9C233C5449E96C3F203663B59B63A229AA22CEF48E5931E49CD0B03E` | 280 |
 | `client/client.js` | `6E4ACBF28D399A79D30F01E8C7D3354540C10CA7AA5062578CE44B7663CA2D32` | 129272 |
 | `package.json` | `591249C13E46A622CDAD899FDFD99355D3615B4CD9EFBAAC6F1EE5F61A780088` | 1697 |
-| `README.zh.md` | `128A7CE9B381A567FBFD56759B36008EC1BFF70321FE398EF3D875959F5EE5FF` | 38823 |
+| `README.zh.md` | `323A802584511C86AD869C0EA12ED309EFD906129D1B039C92AA90504DDDE05C` | 39436 |
 | `cordis.patch.yml` | `9CB32E70D0C4C98255D83F7BF7D1D67F0B2803E88676B864D9FA84E4A4C2D826` | 285 |
 
 **为什么锚这 13 个**：它们就是本表用行号引用的全部仓库内文件（2026-09-22 调整：删去已不存在的 `lib/ui-config.js`——设置通道迁移后该文件已删除；`lib/prompt-literal.js` 自 2026-09-18 起在表内）。**`README.md` 未锚**（本表只用行号引 `README.zh.md`；`README.md` 的一致性由 `pnpm verify` 的双语版本断言守）。**`docs/agents/**` 自身不锚**（本表是锚的**持有者**，自锚会自引用）。
@@ -71,6 +72,8 @@
 | `ctx.get('agentDefaultModel')` | `lib/auto-resume.js:9` | `packages/core/agent-default-model` | resume 缺少模型选择 |
 | `ctx.get('sessionTitle')` / `ctx.get('workspaceRegistry')`（**调用时惰性读取**，0.1.9 起） | `lib/peer-message.js:27`（title）、`:78`（workspace） | `packages/session/session-title`、`packages/workspace/workspace` | 工具返回退化（标题/工作区名丢失） |
 | `timer` 服务（`inject: ['timer']`） | `lib/web-restart.js:5`、`lib/global-prompt.js:5` | `packages/util/time` | 定时轮询不执行；apply 挂起 |
+| ⭐ **本插件自注册路由的「来源守卫」**（Origin 比对 + Host fence + `sec-fetch-site`） | `lib/request-guard.js`（`isSameOriginRequest` 纯函数 / `originGuard` HTTP 薄层）；调用点 `lib/web-restart.js:150`、`lib/global-prompt.js:289`，**绑定字面量取自 `webServer.host`** | 与 harness 自己的 `packages/client/connection/src/api-request-trust.ts:91` `isTrustedApiRequest` **同构**（三道栅栏：Host fence · `sec-fetch-site !== 'cross-site'` · Origin 比对）；loopback 谓词口径对齐 `packages/client/connection/src/loopback-hostname.ts:12` | 两条路由用 `webServer.register()` 直注册，**绕过了覆盖整个 `/api/` 前缀的鉴权网关**（实测：**不存在的** `/api/xxx` ⇒ 401，而 `/api/restart`、`/api/session-toolkit/state` ⇒ 200）⇒ 浏览器里任意页面可发**简单请求**（无自定义头 ⇒ 无预检）：`POST /api/restart` 是**改状态**的 ⇒ **可被跨站触发重启**（中断/DoS，不丢数据）；state 只读、响应无 CORS 头 ⇒ 跨域能发、读不到 |
+| ⭐ `webServer.host` 的取值域（守卫条件化的依据） | 传参处 `lib/web-restart.js:150`、`lib/global-prompt.js:289` | `packages/host/webserver/src/index.ts:61` —— `host: '127.0.0.1' \| '0.0.0.0'`（注释：*the two supported values are loopback and all-interfaces*） | 栅栏 A **只在绑定非 `0.0.0.0` 时施加**，故条件写作 **`bindHost !== ALL_INTERFACES_BIND`**、**不是** `=== '127.0.0.1'`：**契约变宽时守卫应变严而非变松**——等值写法在出现第三种绑定模式时会**整个跳过栅栏 A**（fail-open 且静默；2026-09-22 D 实测 `bindHost='10.0.0.1'` + rebinding 形态 ⇒ 放行） |
 | ⭐ **V4 会话消息来源**：写进会话的每条消息都必须带**生产者归属**的 `source.kind` | `lib/peer-message.js:109`（`source: { kind: 'agent-message', form: 'relay', senderSessionId: String(caller.id) }`） | 准入规则 `packages/session/session-format-v3-to-v4/src/message-sources.ts:9`（**只拒绝 `kind === 'plugin'`**，其余非空字符串一律放行）；`agent-message` 的形状 `packages/subagent/subagent/src/continuation-messages.ts:16`（**恰好三键**）、校验 `packages/session/session-format-v2-to-v3/src/payload.ts:115-120`（`form` 必须 `'relay'`、`senderSessionId` 非空）；GUI 渲染 `packages/client/ui-chat/src/client/chat/turn-trigger.ts:35`（`message.trigger.agent`） | **整次发送被拒**（`format v4 message requires a producer-owned source kind`）。⚠️ 注意反向陷阱：写 `kind:'user'` **能通过准入**（不是 `'plugin'`），但把「另一个 Agent 发来的消息」记成「人类用户发的」——**V4 这次升级要消灭的正是这种失真**，所以判据是**语义正确**而不是"没报错"（2026-09-22 由 A 发现、B 落地） |
 | `inject` 服务并集 | `lib/index.js:60-72` | 各 provider 包 | 缺一服务会**拖慢整包 apply**（`README.zh.md:246` 已知限制） |
 | ⭐ `ctx.get('agentPresets')` → **`resolve(id?)` / `mount(ctx, id?)`**（G5 补行） | `lib/auto-resume.js:89,104`、`lib/session-admin.js:249,254,258` | `packages/preset/agent-preset-registry/src/index.ts:185`（`resolve`）、`:243`（`mount`） | **新建/恢复出来的会话不 mount preset ⇒ 它的工具、提示词段、skill 全部从"空全局层"解析**——而返回仍是 `ok:true`，即**一个"成功但残缺"的会话**。插件对两种情形分开处置：**服务缺失**=合法降级（带说明性 note）；**服务在但默认 preset 解析失败**=环境坏了（建会话之前就报 `PRESET_RESOLVE_FAILED`，不产生残缺会话） |
@@ -81,6 +84,24 @@
 | 引用文件读取上限（`maxFileBytes` / `maxTotalBytes`）+ 按 `mtimeMs`/size 缓存 + 投影不重建 | `lib/global-prompt.js`（`readPromptFiles`、`recordStatus`） | 本插件自身（`runtime.fileStatus` 是进程内投影，经 `GET /api/session-toolkit/state` 送出） | 每个模型步一次无谓重建/落盘 + 超大文件同步阻塞组装/撑爆提示词 |
 
 **红线（改 host 必读）**：DSH 的 `scope.get()` 返回值被 `deepFreeze`。写入前必须先 `{ ... }` 拷贝（数组 `.slice()`），再 `update()`。这是「工作区列表空」的根因，见 `README.zh.md:297`「frozen 配置铁律（红线）」。
+
+### A.1 残余限制与须并联读的判据（**不得只读上表就以为"已加固"**）
+
+**残余限制四条**（守卫的射程之外）：
+
+1. **绑定 `0.0.0.0` 时 DNS rebinding 仍未挡住** —— 那种部署下没有"名字"可判别，施加 loopback 限制会把局域网正当客户端一起拒掉。**本机绑定是 `127.0.0.1`（`lsof` 实测 `TCP 127.0.0.1:3080 (LISTEN)`）⇒ 在本部署下栅栏 A 生效、该洞已堵。**
+2. **守卫只针对"浏览器里的第三方页面"** —— 能伪造 `Host`/`Origin` 的**非浏览器客户端本就不在射程内**（能伪造 Host 的也能伪造 Origin）。
+3. **`0.0.0.0` 下若要用"允许的对外名字"白名单，需要 harness 先暴露 `trustedHosts`**（本插件读不到；harness 原文：*a non-loopback (0.0.0.0) deployment must declare the names it is reached by*）。
+4. **任何非 `0.0.0.0` 的第三种绑定模式都会被施加 loopback 限制** ⇒ 该部署下局域网正当客户端会被拒。**这是有意的 fail-closed**：**偏严会被立刻发现，偏松不会**。
+
+**须与守卫一起读的判据三条**：
+
+- **`sec-fetch-site` 不是 rebinding 的解药**：rebinding 的请求在浏览器看来是**同源**（发 `same-origin`）⇒ 该栅栏只是纵深防御。**`same-site` 必须放行**——它正是 rebinding 的形态，拒了会误伤本机正当访问，**只能靠栅栏 A 挡**。
+- **将来会静默失效的点**：`isLoopbackHostname` 现额外宽容三条**当前不可达**的输入（大写 `LOCALHOST` / 带空白 `" localhost "` / 裸 `::1`）。**若有人改去判原始 `Host` 字符串，这三条立刻变成真实宽容。**
+- **装置层面（本次安全复核留下，适用于本表任何"有负向对照"的门）**：
+  ① **变异锚会随被测对象漂移而静默失效** ⇒ 靠装置内「**变异未生效即判失败**」兜住；
+  ② **结构锚的代价**是条件被重写时失配，兜法同样是"未生效即失败"而不是静默跳过；
+  ③ **一个对照要成立须同时满足三件事**：**变异真的改到了对象上** · **输入集真的能分辨这道防御** · **未被点名的用例保持原状**。三者缺一，**"它红/它绿"都不携带信息**。
 
 ## B. Client 契约
 
