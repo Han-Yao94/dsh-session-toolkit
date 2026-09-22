@@ -2119,6 +2119,9 @@ collect('web-restart', apply);
     (function () {
     var module = { exports: {} };
     var exports = module.exports;
+    // 本块用 react.useState / react.useEffect（组件自身状态），而 react/jsx-runtime 不提供 react，
+    // 二者是两条 require；此前只引了后者 ⇒ 渲染到 SessionLogDownloadHeaderAction 时整块崩掉。
+    var react = require('react');
     var react_jsx_runtime = require('react/jsx-runtime');
     var primitives = require('@deepseek-ai/dsh-client-ui-primitives');
     var runtime_client = require('@deepseek-ai/dsh-client-store');

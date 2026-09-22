@@ -306,6 +306,7 @@ node scripts/dsh-log-ui.drift.mjs --harness <deepseek-harness 路径>          #
 ## 已知限制与暂缓事项
 
 - client 半为手工维护的单文件 IIFE 包;新增功能需同步维护 `lib/` 与 `client/client.js` 两处。
+- **client 半的「标识符作用域」没有任何门覆盖。** 调 `react.useState` 的块必须同时 `require('react')`：`react/jsx-runtime` **不提供**它，而缺绑定时组件渲染即抛错；**slot 渲染器会把那个抛错吞掉并丢掉整条 entry**，于是症状是「按钮静默地不见了」，而不是任何人看得见的报错。**这一形态从 2026-09-18（`3e44642` 加了 hooks 调用却没加 require）活到 2026-09-22**，穿过了全部的门。
 - **收到的跨会话消息在界面上是「收起的一行」,不是可读的正文。** `send_to_session` 按**生产者归属**记录投递——`source: { kind: 'agent-message', form: 'relay', senderSessionId }`——而客户端对**所有**非人类来源都走它对 turn trigger 的渲染,那一行**默认收起,点开才见正文**。写成 `kind: 'user'` 会像人类消息一样 inline 展开,但会把**另一个 Agent 的话记成用户说的**——而那正是 V4 唯一规定为「生产者拥有」的字段。归属优先;**点那一行即可读到正文**(正文首行仍自带发件人)。
 - **图标名属于集成面。** DSH 0.1.7 把 `@deepseek-ai/dsh-client-ui-primitives` 的图标从 `IconXxxOutline<尺寸>` 改名为 `IconXxxOutlineRegular` / `IconXxxOutlineMedium`(1 px 与 1.3 px 笔画;artwork 保留旧默认 `size`),因此 client 半必须使用**目标 harness** 的名字。不存在的名字求值为 `undefined`,而 `React.createElement(undefined, …)` 会抛错,导致**该组件子树整片空白、而它的导航行照常出现**(注册与渲染是两件事)。**这一形态对其余所有门都是静默的**——语法门、打包门、锚门当时全绿。用 `node scripts/primitives-export.assert.mjs --harness <checkout>` 守它:exit 1 会逐条列出插件引用了、而已装 harness 并未导出的成员。
 - 平移的 Session log 入口依赖官方 `sessionLogDownload` controller 接口,且复刻官方 0.1.6 的「⋯ 更多操作」菜单形态;**它是冻结的复刻件**:DSH 升级后跑一次 `node scripts/dsh-log-ui.drift.mjs --harness <checkout>`——它按同一组锚点双向审计,漂移即非零退出(§E)。**有意的分叉**:官方 header 菜单此后多了第二项(`feedback`),本复刻件只保留 download;这是**已裁定的状态、不是待决问题**——门把它记成 note 而非失败,正因为"跟随上游新增能力"本身是一个决定,而该决定已于 2026-09-22 作出:**不跟随**。只有确实想要那个 feedback 入口时才需要重开。
