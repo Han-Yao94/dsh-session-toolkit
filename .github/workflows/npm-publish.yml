@@ -139,6 +139,29 @@ jobs:
           node-version: 20
       - run: node scripts/request-guard.assert.mjs --selftest
 
+  scope-identifiers:
+    # 标识符作用域门（`client/client.js`）：每个 IIFE 模块块里「用到的模块别名」必须在**该块内**有
+    # require 绑定。守的是 2026-09-22 那个活了 4 天的形态 —— 模块 4 调 `react.useState` 而只 require
+    # 了 `react/jsx-runtime`（两条不同的 require）⇒ `ReferenceError: react is not defined`
+    # ⇒ slot 渲染器把抛错吞掉、整条 entry 消失 ⇒ 用户看到的是「按钮不见了」，不是报错。
+    # 它穿过当时**全部**门：语法门（语法合法）· 打包门（入口可达）· 锚门（哈希对）· primitives-export
+    # （只核 primitives.X 的成员是否存在）⇒ 这一格原本无人守。
+    #
+    # 为什么可以挂 CI（与 §D 步骤 10 那两条不同）：**零外部输入** —— 只读 `client/client.js` 一个文件，
+    # 不读 profile、不读 harness checkout、不打任何端口 ⇒ 在只有插件仓库的 CI 里也能给出真判定。
+    #
+    # 门自带三道自保：① 块切分失配即报红（块头/闭包数不自洽、或块数≠基线 ⇒ **不许**当成
+    # "没有块要检查"返回 0）；② 变异未生效即判失败；③ 负向对照（还原本次缺陷）必须红、惰性对照必须不红。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/scope-identifiers.assert.mjs --selftest
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
@@ -146,7 +169,7 @@ jobs:
     #     `scripts/clamp-call.assert.mjs` 经裁定归**探测器**（文本级调用计数、别名可绕、红在合法重构下
     #     属设计如此），故它不接进本 workflow；它挂 package.json 的 assert:clamp / assert:clamp:selftest，
     #     由「改 client/client.js 钳制段时必跑」的流程项约束（人监督清单项，同 §D.3 改行号重核）。
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers]
     # ⚠️ `request-guard` **加入 needs**（D 的判断，理由如下，与"探测器不挂 needs"的既有约定不冲突）：
     #   本仓库的判据是「**契约门**挂 needs、**探测器**只挂 selftest job 内的步骤」，而分界的实质是
     #   **红是否可被合理驳回**：
