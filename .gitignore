@@ -1,6 +1,9 @@
 # 依赖
 node_modules/
 
+# pnpm 的本地内容寻址存储（install 时落在仓库根，勿入库）
+.pnpm-store/
+
 # 日志与临时文件
 *.log
 npm-debug.log*

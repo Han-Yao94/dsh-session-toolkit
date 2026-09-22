@@ -291,7 +291,11 @@ const BACKENDS = {
 
 // ------------------------------------------------------------------ 运行器
 function makeCtx(backend, log, options = {}) {
-  const scope = {
+  // 每会话开关是本条目 config 的 volatile 字段（DSH 0.1.7 起）：被测代码只调 .get()。
+  const sessionsRef = { get: () => ENABLED }
+  // 旧内核的 settings 命名空间桩：负向对照要跑历史修订版（它们走 ctx.settings.register），
+  // 缺了它坏对照会以「apply 抛错」而非「选中集合不同」报红，断言就不再指向被测缺陷。
+  const legacyScope = {
     get: () => ({ sessions: ENABLED }),
     watch: () => () => {},
     update: async () => {},
@@ -310,13 +314,16 @@ function makeCtx(backend, log, options = {}) {
     effect: (fn) => { const d = fn(); return typeof d === 'function' ? d : () => {} },
   }
   return {
-    settings: { register: () => scope },
+    sessionsRef,
+    settings: { register: () => legacyScope },
     get: (name) => {
       if (name === 'sessionPersistence') return backend // 旧代码在 apply 时刻一次性取值
       if (name === 'sessionController') return controller
       if (name === 'agentDefaultModel') return { currentSelection: () => ({ provider: 'p', model: 'm' }) }
       return undefined
     },
+    // 新代码用 ctx.on 监听 loader/volatile-update（本门只覆盖启动恢复，故登记后不触发）
+    on: (event) => { if (event === 'loader/volatile-update') log.volatile.push(event); return () => {} },
     // 新代码用 ctx.inject 等服务就绪；这里同步回调，模拟"服务已在"
     inject: (names, cb) => {
       if (names.includes('sessionPersistence')) cb(childCtx)
@@ -345,12 +352,13 @@ async function settle(log, budgetMs = 1500) {
 }
 
 async function runCase(file, backendName, options = {}) {
-  const log = { resume: [], controller: [], warn: [] }
+  const log = { resume: [], controller: [], warn: [], volatile: [] }
   const original = console.warn
   console.warn = (...args) => { log.warn.push(args.map(String).join(' ')) }
   try {
     const mod = await import(`${pathToFileURL(file).href}?r=${Math.random()}`)
-    mod.apply(makeCtx(BACKENDS[backendName](), log, options), { concurrency: 2 })
+    const ctx = makeCtx(BACKENDS[backendName](), log, options)
+    mod.apply(ctx, { concurrency: 2, sessions: ctx.sessionsRef })
     await settle(log)
   } finally {
     console.warn = original

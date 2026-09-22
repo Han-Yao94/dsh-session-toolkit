@@ -4,7 +4,7 @@
 
 A consolidated plugin toolkit for the **DeepSeek Harness**. Six previously separate local plugins — **session identity**, **global prompt**, **session auto-resume**, **web restart service**, **Session-log button relocation**, and **peer-session messaging** — merged into a single installable package that ships in the official bundle form (`dsh.bundle.patch`) and installs with `dsh plugin add`; it also includes a **Prompt Dedup** feature.
 
-Current version: **0.1.10**, verified against **DeepSeek Harness `dsh-v0.1.6-alpha.2`** (older kernels keep working through the fallbacks noted below).
+Current version: **0.1.10**, verified against **DeepSeek Harness `dsh-v0.1.7-alpha.1`** — which is also its **minimum supported version**: 0.1.6 and earlier fail loudly by design rather than degrading silently (see [Compatibility](#compatibility)).
 
 ---
 
@@ -20,7 +20,7 @@ A settings page (`settings.section`, id `global-prompt`, order 30) rendered as *
 Per-workspace prompt injected for sessions whose `cwd` prefix-matches a configured workspace directory (that directory plus its subdirectories). The workspace list is derived from **active sessions' `cwd`** (`ctx.agents.roots()`), deduplicated and counted. When several enabled workspaces prefix-match a session's `cwd`, the **most-specific (longest matching path)** one wins. `removed` records paths the user removed so the active-workspace sync never re-adds them. The workspace row's enable switch is **live-save** (persisted immediately); the Save button only persists the prompt **content + referenced files**.
 
 ### Referenced Files
-Both global and workspace prompts can reference a **list of files**. Every assembly re-reads each referenced file (UTF-8, content cached by `mtimeMs` + size, so an unchanged file is not re-read) and injects it after the prompt text. Byte budgets are enforced (`globalPrompt.maxFileBytes` / `maxTotalBytes`, defaults 256 KiB / 1 MiB): an oversized file is **skipped** rather than blocking assembly. A read failure is skipped too, and both cases are reported in the UI with the reason. Supports plain text and markdown. Per-file read status is projected to the UI via the `prompt-file-status` namespace (`ok`: N chars / `fail`: reason / pending); the projection is only written when the status actually changed (a settings write persists the whole `settings.yaml`).
+Both global and workspace prompts can reference a **list of files**. Every assembly re-reads each referenced file (UTF-8, content cached by `mtimeMs` + size, so an unchanged file is not re-read) and injects it after the prompt text. Byte budgets are enforced (`globalPrompt.maxFileBytes` / `maxTotalBytes`, defaults 256 KiB / 1 MiB): an oversized file is **skipped** rather than blocking assembly. A read failure is skipped too, and both cases are reported in the UI with the reason. Supports plain text and markdown. Per-file read status is a host **runtime projection** delivered to the UI by the read-only route `GET /api/session-toolkit/state` (`ok`: N chars / `fail`: reason / pending); the browser half polls it only while the settings page is open. The status **never touches a configuration file**, and its projection object is only replaced when the content actually changed.
 
 ### Session Auto-Resume
 Sessions with the per-session switch on are resumed automatically after a GUI restart, through the **official resume path** (`ctx.sessionController.resolveAgent`) when it exists — that is what restores the session's own model selection (via `installSelection`) in addition to the preset mount, and it validates subagent ownership and de-duplicates concurrent resumes. Older kernels without `sessionController` fall back to `ctx.agents.resume` plus a preset mount, carrying the default model from `agentDefaultModel`. Switching a session on resumes it immediately (false→true edge). Filters: switch on, top-level only (no subagent origin, no `delegationDepth > 0`, no `parentSession`), non-blank (`eventCount !== 0`, snapshot shape). Concurrency-bounded (`CONCURRENCY = 3`) with per-item failure isolation and an in-flight set that prevents duplicate resume.
@@ -31,7 +31,7 @@ A "Restart service" entry in the General settings (`settings.general.item`, id `
 - **Windows** (`windows-script`): `wscript.exe` runs the launcher VBS, which hides the console and runs `<DSH_HOME>/autostart/dsh-web-restart.cmd`; the spawn inherits the server process token, so the elevated branch (the only UAC source) is never reached.
 - **macOS / Linux** (`posix-relaunch`, or `posix-script` when `webRestart.scriptPath` is set): with no configuration the host **restarts itself** — it generates a one-shot `/bin/sh` script that SIGTERMs the current PID, waits up to 10 s (then SIGKILLs), `cd`s back to the original CWD and re-executes `process.execPath` with the original `process.argv.slice(1)`, appending output to `<DSH_HOME>/autostart/dsh-web-restart.log`. Point `webRestart.scriptPath` at your own `.sh` to take over instead (useful when the server was started by a supervisor).
 
-The client probes `GET /api/restart` on mount and hides the entry when the host reports `available: false` (unsupported platform); `POST` returns 501 there. Routes: `GET /api/restart` (health probe, constant 200 + `available`/`mode`/`platform`) and `POST /api/restart` (trigger; **409** while a restart is in flight, **500** with the reason when the configured script is missing or self-relaunch is impossible, **202** + 500 ms buffer before spawn). The client only enters the overlay on 202 — any other status is shown inline as an error instead of a 90 s dead wait. Recovery is detected by **interruption-then-restore**: the overlay only reloads after it observes the probe fail for `restartFailThreshold` consecutive checks and then return 200 again; if the probe is reachable the whole time it reports "no restart detected" (`noRestart`) until the timeout, offering a manual refresh.
+The client probes `GET /api/restart` on mount and hides the entry when the host reports `available: false` (unsupported platform); `POST` returns 501 there. The same web server also exposes the read-only state route `GET /api/session-toolkit/state` (live workspaces + referenced-file read status; any other method answers 405), which is how the settings page reads those two runtime projections — they no longer occupy a settings namespace and are never persisted. Routes: `GET /api/restart` (health probe, constant 200 + `available`/`mode`/`platform`) and `POST /api/restart` (trigger; **409** while a restart is in flight, **500** with the reason when the configured script is missing or self-relaunch is impossible, **202** + 500 ms buffer before spawn). The client only enters the overlay on 202 — any other status is shown inline as an error instead of a 90 s dead wait. Recovery is detected by **interruption-then-restore**: the overlay only reloads after it observes the probe fail for `restartFailThreshold` consecutive checks and then return 200 again; if the probe is reachable the whole time it reports "no restart detected" (`noRestart`) until the timeout, offering a manual refresh.
 
 ### Session-Log Button Relocation
 Shadows the official entry in `conversation.session.header.utilities` (same id `session-log-download`, priority −1, cell-shadowing) and registers a copy in `conversation.session.header.actions` (id `session-log-download-moved`, order 41), reusing the official `sessionLogDownload` controller (`ctx.get('sessionLogDownload')`) so download behavior stays identical to stock. The copy mirrors the **0.1.6** official surface — a "⋯ More actions" menu whose single item triggers the shared download dialog (localized through this plugin's own locale namespace) — and is a frozen replica: a stock upgrade that changes that UI must be synced by hand, and the shadowing registration must be re-checked whenever the official entry gains new menu items.
@@ -59,21 +59,28 @@ Performs **cross-section line-level deduplication** across the identity / global
 
 ## Compatibility
 
-The plugin is verified against **DeepSeek Harness `dsh-v0.1.6-alpha.2`**. The host- and client-side integration points it uses are present in that native version; the two 0.1.6-only capabilities it consumes (`interpolate: false`, `ctx.sessionController.resolveAgent`) are each guarded by a fallback, so older kernels degrade instead of breaking.
+The plugin is verified against **DeepSeek Harness `dsh-v0.1.7-alpha.1`**, which is also its **minimum supported version**: 0.1.7 replaced the settings model (a plugin registering a namespace, read through `ctx.settingsScope.bind`) with entry `Config` `volatile` fields read through `ctx.configForms`, so the whole user-data surface moved (see [Settings fields](#settings-fields-volatile-parts-of-the-entry-config)). On 0.1.6 and earlier the client entry stays at `pending (waiting for service: configForms)` and `web boot` reports `Failed to load plugins` — a **loud failure** rather than a silent degradation; upgrade the harness or uninstall this plugin. The existing fallbacks for `interpolate: false` and `ctx.sessionController.resolveAgent` are unchanged.
 
-- **Framework**: `@deepseek-ai/cordis` 4.0.2 and `@deepseek-ai/schemastery` 3.18.2 (the versions `dsh-v0.1.6-alpha.2` vendors). The plugin loads through the cordis harness and registers as a bundle via `dsh.bundle.patch`.
-- **Host services** (verified against the native source): `ctx.settings.register(ns, schema, { applies: 'live', base })` → scope `{ get / watch(next, prev) / update / replace }` where `get()` returns a deep-frozen value; `ctx.systemPrompt.section({ name, order, text, interpolate: false })`; `ctx.agents.{ get, resume({ resumeSessionId, agentOptions, setup }), roots, requireInitiator }`; `ctx.sessionController.resolveAgent(sessionId)`; `session.header` fields (`cwd`, `origin`, `delegationDepth`, `parentSession`, `agentPreset`; there is no `seedLength`); `ctx.inject(names, cb)` for late-arriving optional services; `ctx.get('webServer').register({ kind: 'exact', path, handler })`; `@deepseek-ai/dsh-tools` `defineTool` + `tools.register()`; and `ctx.get('agentDefaultModel')`, `sessionPersistence`, `sessionTitle`, `workspaceRegistry`, `sessionLogDownload`, `timer`, `on`, `effect`.
-- **Client services** (verified): `window.__ModuleLoader__.load({ id, factory })`; `ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)` with **lower-priority shadows**; `ctx.get('settingsScope').bind({ namespace })` → `{ getSnapshot()/.value/.status, set(field, value), subscribe }`; `ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`; and the `timer` client service (`ctx.timeout`). The bundle's runtime `require`s resolve against the platform seed words (`react`, `react/jsx-runtime`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-primitives`, …).
+- **Framework**: `@deepseek-ai/cordis` 4.0.3 and `@deepseek-ai/schemastery` 3.18.3 (the versions `dsh-v0.1.7-alpha.1` vendors). The `@deepseek-ai/schemastery` floor is `^3.18.3`: `volatile()` exists only from that version, and earlier 3.18.x builds make the `Config` constructor throw. The plugin loads through the cordis harness and registers as a bundle via `dsh.bundle.patch`.
+- **Host services** (verified against the native source): this entry `Config`'s `volatile()` fields read live through `.get()`, with `ctx.on('loader/volatile-update', …)` notifying after a commit (no remount); `ctx.get('settings').update('session-toolkit', patch)` as the host write path back into the entry config (used by the workspace auto-add); `ctx.systemPrompt.section({ name, order, text, interpolate: false })`; `ctx.agents.{ get, resume({ resumeSessionId, agentOptions, setup }), roots, requireInitiator }`; `ctx.sessionController.resolveAgent(sessionId)`; `session.header` fields (`cwd`, `origin`, `delegationDepth`, `parentSession`, `agentPreset`; there is no `seedLength`); `ctx.inject(names, cb)` for late-arriving optional services; `ctx.get('webServer').register({ kind: 'exact', path, handler })`; `@deepseek-ai/dsh-tools` `defineTool` + `tools.register()`; and `ctx.get('agentDefaultModel')`, `sessionPersistence`, `sessionTitle`, `workspaceRegistry`, `sessionLogDownload`, `timer`, `on`, `effect`.
+- **Client services** (verified): `window.__ModuleLoader__.load({ id, factory })`; `ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)` with **lower-priority shadows**; `ctx.get('configForms').get('session-toolkit')` → form `{ getSnapshot()/.value/.status, subscribe, set(field, value), unset(field), mutate(ops, expectedRevision) }`, whose host-validated writes land in the active profile's `cordis.patch.yml`; `ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`; and the `timer` client service (`ctx.timeout`). The bundle's runtime `require`s resolve against the platform seed words (`react`, `react/jsx-runtime`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-primitives`, …).
 
-### Configuration validation
-The plugin's **host-side** `Config` validates the entire configuration tree with schemastery as soon as the plugin loads. `config.client` is **not** delivered to the browser by cordis: the harness creates every client entry with `loader.create({ name })` and its boot-graph rows carry only `id/url/rev/inject/immediately/external`, and the browser module table has no `@deepseek-ai/schemastery`, so a client bundle cannot export a `Config` either. The host therefore mirrors `config.client` into the `session-toolkit-ui` settings namespace as its composition **base**, and the client half reads that namespace through `ctx.get('settingsScope').bind({ namespace: 'session-toolkit-ui' })`. Resolution order is schema default → `config.client` (base) → user's `settings.yaml`; if the namespace is unavailable the client keeps its frozen fallback values.
+### Configuration and the settings data plane
+The plugin's **host-side** `Config` validates the entire configuration tree with schemastery as soon as the plugin loads; resolution order is schema default → profile patch (user layer), both resolved on the host before the plugin sees them.
+
+From DSH 0.1.7 on, settings projects **only fields declared `volatile()`**, and a settings surface is identified by exactly two facts: the **id of the edited entry** (`session-toolkit`) and **that entry's `Config`**. Consequently:
+
+- User data (identity texts, global and per-workspace prompts, the auto-resume switches, the UI knobs) are `volatile` fields: the browser half reads and writes the same entry `Config` through `ctx.get('configForms').get('session-toolkit')`, and host-validated writes land in the **active profile's `cordis.patch.yml`** (there is no `settings.yaml` namespace and no `settingsScope` service any more).
+- The host half calls `.get()` wherever it needs a value: a committed `volatile` update **does not remount the plugin**, so the identity and global-prompt sections pick the new text up on the next assembly, and `auto-resume` resumes a newly enabled session immediately through `loader/volatile-update`.
+- Ordinary fields (orders, budgets, retry and concurrency knobs) stay non-`volatile`: they are still visible in the settings form, but editing them goes through the normal cordis configuration lifecycle.
+- The **read-only runtime projections** (live workspaces, referenced-file read status) are not configuration at all: they go straight to the browser through `GET /api/session-toolkit/state` and never land in a file or in a form.
 
 ---
 
 ## Architecture
 
-- **Host half** — `lib/index.js` composes nine feature modules (`identity.js`, `global-prompt.js`, `auto-resume.js`, `web-restart.js`, `peer-message.js`, `log-reposition.js`, `prompt-dedup.js`, `prompt-literal.js`, `ui-config.js`). `inject` is the deduplicated union of module dependencies; each module's `apply` runs inside a `safe()` guard so one failing module never takes the whole package down. Every contribution is lifecycle-bound (`ctx.effect` for prompt sections and HTTP routes, plugin-fiber registrations for tools; timers go through the `timer` service). `global-prompt.js` owns the `global-prompt`, `workspace-prompt`, `workspace-registry-active`, and `prompt-file-status` namespaces, the `readPromptFiles` helper (mtime/size-cached live read), and the workspace/live-workflow projection (`agents.roots()` → active workspaces); `prompt-literal.js` is the pre-0.1.6 fallback for literal prompt rendering; `ui-config.js` registers the `session-toolkit-ui` namespace that carries `config.client` to the browser.
-- **Client half** — `client/client.js` is a single `window.__ModuleLoader__.load` bundle; the five UI modules live in IIFEs and are collected into one `apply` that registers all slots in order (guarded per module). All UI uses `React.createElement`; styles are injected as `data-plugin` style tags with theme CSS variables and dark-mode coverage; no global DOM manipulation. The global-prompt module renders the **Tabs (Global / Per workspace)** page plus a reusable `FileRefsPanel` (add/remove referenced files, per-file status via the bound `prompt-file-status` scope).
+- **Host half** — `lib/index.js` composes nine feature modules (`identity.js`, `global-prompt.js`, `auto-resume.js`, `web-restart.js`, `peer-message.js`, `session-admin.js`, `log-reposition.js`, `prompt-dedup.js`, `prompt-literal.js`). `inject` is the deduplicated union of module dependencies; each module's `apply` runs inside a `safe()` guard so one failing module never takes the whole package down. Every contribution is lifecycle-bound (`ctx.effect` for prompt sections and HTTP routes, plugin-fiber registrations for tools; timers go through the `timer` service). `global-prompt.js` owns the `globalPrompt` and `workspacePrompt` volatile fields, the `readPromptFiles` helper (mtime/size-cached live read), the live-workspace aggregation (`agents.roots()` → `GET /api/session-toolkit/state`), and the config write that adds newly discovered workspace paths back into the entry (`ctx.get('settings').update('session-toolkit', …)`); `prompt-literal.js` is the pre-0.1.6 fallback for literal prompt rendering.
+- **Client half** — `client/client.js` is a single `window.__ModuleLoader__.load` bundle; the five UI modules live in IIFEs and are collected into one `apply` that registers all slots in order (guarded per module). All UI uses `React.createElement`; styles are injected as `data-plugin` style tags with theme CSS variables and dark-mode coverage; no global DOM manipulation. The global-prompt module renders the **Tabs (Global / Per workspace)** page plus a reusable `FileRefsPanel` (add/remove referenced files, per-file status from the polled `GET /api/session-toolkit/state` projection).
 
 ### Registered slots
 
@@ -92,23 +99,25 @@ The plugin's **host-side** `Config` validates the entire configuration tree with
 
 ## Configuration
 
-### Settings namespaces
+### Settings fields (volatile parts of the entry config)
 
-Schema-validated namespaces, `applies: live`, persisted in `settings.yaml`:
+The entry id is fixed at `session-toolkit`; the `volatile()` fields below are exactly the data the settings page reads and writes. They are schema-validated and land in the active profile's `cordis.patch.yml`. The field name is the config path (`identity.sessions` etc.), and the browser half addresses the same paths through `configForms.get('session-toolkit')`.
 
-| Namespace | Schema | Notes |
+| Field | Schema | Notes |
 |---|---|---|
-| `session-identity` | `{ default: {enabled: boolean, text: string}, sessions: Record<sessionId, {enabled, text}> }` | Resolution: session record → default → empty. Disabled or empty entries inject nothing. Identity text is clipped to 8000 chars (token guard). |
-| `session-auto-resume` | `{ sessions: Record<sessionId, boolean> }` | Switch per session; absent keys mean off. |
-| `global-prompt` | `{ enabled: boolean, content: string, files: string[] }` | Injected into every conversation when enabled. `files` is the list of referenced files appended at assembly (live read with mtime/size cache; failed or oversized files skipped). |
-| `workspace-prompt` | `{ workspaces: Record<path,{enabled, content, files: string[]}>, removed: string[] }` | Per-workspace prompt. A session gets the most-specific (longest matching path) enabled workspace whose directory prefix-matches its `cwd`. `removed` lists paths the user removed so the active-workspace sync never re-adds them. |
-| `workspace-registry-active` | `{ active: [{path, sessionCount}] }` | Read-only projection of live workspaces aggregated from **`ctx.agents.roots()`** (each agent's `session.header.cwd`, deduped and counted). Never sourced from `workspaceRegistry` (which is not visible in this plugin's scope). |
-| `prompt-file-status` | `{ byScope: Record<global\|path, [{filePath, status: 'ok'\|'fail', charCount?, reason?}]> }` | Read-only projection of the most recent read result of each scoped referenced file; the UI's `FileRefsPanel` reads it to show `ok: N chars` / `fail: reason`. Written **only when the status changed** (each write persists the whole `settings.yaml`). |
-| `session-toolkit-ui` | `{ identityCharLimit, restartTimeoutMs, restartPollMs, restartFillMs, restartFailThreshold, restartSettleMs, copyFeedbackMs }` | Host-registered, read-only-by-convention namespace carrying the UI knobs to the browser half; `config.client` is its composition base. This is the only host→browser configuration channel available to a client bundle. |
+| `identity.default` | `{enabled: boolean, text: string}` | Default identity. Resolution: session record → default → empty. Disabled or empty entries inject nothing. |
+| `identity.sessions` | `Record<sessionId, {enabled, text}>` | Per-session identity, clipped to `identity.maxText` (8000 chars, token guard). |
+| `autoResume.sessions` | `Record<sessionId, boolean>` | Per-session "resume after restart" switch; absent keys mean off. |
+| `globalPrompt.{enabled,content,files}` | `{enabled: boolean, content: string, files: string[]}` | Injected into every conversation when enabled. `files` is the list of referenced files appended at assembly (live read with mtime/size cache; failed or oversized files skipped). |
+| `workspacePrompt.workspaces` | `Record<path,{enabled, content, files: string[]}>` | Per-workspace prompt. A session gets the most-specific (longest matching path) enabled workspace whose directory prefix-matches its `cwd`. |
+| `workspacePrompt.removed` | `string[]` | Paths the user removed, so the active-workspace sync never re-adds them. |
+| `client.*` | 7 UI knobs (see the table below) | Browser-half runtime parameters (char limit, restart timeout/poll/fill, copy feedback). |
+
+**Runtime projections (never persisted, not configuration):** live workspaces `[{path, sessionCount}]` aggregated from **`ctx.agents.roots()`** (each agent's `session.header.cwd`, deduped and counted; never sourced from `workspaceRegistry`, which is not visible in this plugin's scope) and referenced-file read status `Record<global\|path, [{filePath, status: 'ok'\|'fail', charCount?, reason?}]>`; both reach the settings page through `GET /api/session-toolkit/state`.
 
 ### Plugin Config (cordis)
 
-The plugin exposes a single `Config` (schemastery schema) with per-feature keys. Defaults equal current behavior; override them via the plugin row's `config` in `cordis.yml` / `cordis.patch.yml` without touching code. `config.client` is validated on the host and becomes the **base layer of the `session-toolkit-ui` namespace**, which is how the browser half receives it (see [Configuration validation](#configuration-validation)).
+The plugin exposes a single `Config` (schemastery schema) with per-feature keys. Defaults equal current behavior; override them via the plugin row's `config` in `cordis.yml` / `cordis.patch.yml` without touching code. The `.volatile()` keys (user data plus `client.*`) are exactly what the settings page reads and writes, and the browser half sees the same resolved values through `configForms.get('session-toolkit')` (see [Configuration and the settings data plane](#configuration-and-the-settings-data-plane)).
 
 ```yaml
 - id: session-toolkit
@@ -117,20 +126,31 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
     identity:
       maxText: 8000
       sectionOrder: 40
+      default:                # volatile: default identity
+        enabled: false
+        text: ''
+      sessions: {}            # volatile: Record<sessionId, {enabled, text}>
     globalPrompt:
       sectionOrder: 50
       workspaceSectionOrder: 60
       maxFileBytes: 262144    # per referenced file; oversized files are skipped and reported as fail
       maxTotalBytes: 1048576  # across all referenced files of one section
+      enabled: false          # volatile: global prompt switch
+      content: ''             # volatile: global prompt body
+      files: []               # volatile: referenced file list
+    workspacePrompt:          # volatile: per-workspace prompts
+      workspaces: {}          # Record<path, {enabled, content, files}>
+      removed: []             # paths the user removed
     autoResume:
       concurrency: 3
+      sessions: {}            # volatile: Record<sessionId, boolean>
     webRestart:
       scriptPath: ''          # optional; default derived as <DSH_HOME>/autostart/dsh-web-restart.cmd
       spawnDelayMs: 500
     promptDedup:
       enabled: true           # cross-section line-level dedup across identity/global/workspace; default true (disable only by setting false)
     client:
-      identityCharLimit: 4000
+      identityCharLimit: 4000 # volatile: the 7 keys below are read by the browser half
       restartTimeoutMs: 90000
       restartPollMs: 1000
       restartFillMs: 600
@@ -151,7 +171,11 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 | `webRestart.scriptPath` | derived | Restart script path. Empty (default) = derive `<DSH_HOME>/autostart/dsh-web-restart.cmd` on Windows / `…/dsh-web-restart.sh` on macOS+Linux, and on POSIX additionally enable **self-relaunch** (no script needed). Set a path to take over with your own script — on POSIX it runs via `/bin/sh`, and a missing file makes `POST` fail fast with 500 instead of hanging the overlay. |
 | `webRestart.spawnDelayMs` | 500 | Delay before spawning the restart script (202 buffer). |
 | `promptDedup.enabled` | true | Cross-section line-level deduplication across the identity/global/workspace system-prompt sections (on by default; disable only by setting it to `false`). When on, each **identical non-blank original line** across the three sections keeps only its "first occurrence" (a single `seen` set spans all three); duplicate lines in later sections are dropped, while **blank lines are always preserved** (they are markdown's paragraph/list separators). Every section's unique content is preserved. It does not parse `{{name}}` placeholders, does not break markdown, never sets `complete`, and never touches harness-owned sections. |
-The `client.*` keys below are validated by the host and become the **base layer of the `session-toolkit-ui` namespace** — the channel the browser half actually reads. Users can also override them per user in `settings.yaml` under that namespace.
+| `identity.default` / `identity.sessions` | empty | **User data** (volatile): default identity and per-session identities. Written by the "Session identity" settings page; also editable directly in the profile patch. |
+| `globalPrompt.enabled` / `.content` / `.files` | off / empty | **User data** (volatile): global prompt switch, body, and referenced file list. |
+| `workspacePrompt.workspaces` / `.removed` | empty | **User data** (volatile): per-workspace prompts plus the removed-path list. The active-workspace sync adds newly discovered paths to `workspaces` (through `ctx.get('settings').update`); paths listed in `removed` are never re-added. |
+| `autoResume.sessions` | empty | **User data** (volatile): per-session "resume after restart". A false→true edge resumes that session immediately. |
+The `client.*` keys below are validated by the host; they are the very fields the browser half reads through `configForms.get('session-toolkit')` (when the form is unavailable the client falls back to `UI_FALLBACK` in `client/client.js`, whose values equal the historical defaults). You can edit them in the plugin's settings page.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -207,7 +231,7 @@ Published on **npm** as `dsh-session-toolkit` (**latest published version: v0.1.
 - **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.
 - **Tarball**: `pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`.
 
-Runtime dependencies (`@deepseek-ai/schemastery`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-home-paths`) are declared in `dependencies` and install automatically; platform modules (`react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-locale`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-primitives`) are `peerDependencies` provided by the DSH host. Harness-provided ranges are written as a **prerelease union** — `^0.1.2-alpha.5 || ^0.1.6-alpha.2` — because caret ranges never cross a minor line and `^0.1.2-alpha.1` cannot match `0.1.6-alpha.2` (this is exactly what produced the §F resolution skew: the plugin ended up with its own older copy while the host ran a newer one). `@deepseek-ai/dsh-client-ui-slots` is intentionally absent: the `slots` service is seeded by the web shell, so a npm peer declaration was dead weight. Verified: a clean install of the packed tarball resolves all imports without any local junction. Two install-side tools back this up (they need an external checkout/profile, so they are not CI jobs — see `docs/agents/integration-contracts.md` §D/§E/§F):
+Runtime dependencies (`@deepseek-ai/schemastery` — floor `^3.18.3`, the first version with `volatile()` —, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-home-paths`) are declared in `dependencies` and install automatically; platform modules (`react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-locale`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-primitives`) are `peerDependencies` provided by the DSH host. Harness-provided ranges name **one prerelease generation each** — `^0.1.7-alpha.1` — because a caret range never crosses a minor line, and semver additionally requires a comparator carrying a prerelease **of the candidate's own `major.minor.patch`**; that is why `^0.1.2-alpha.5 || ^0.1.6-alpha.2` used to be written as a union, and it is exactly how the §F resolution skew happened (the plugin kept its own older copy while the host ran a newer one). With `dsh-v0.1.7-alpha.1` as the minimum supported version, the older union members are gone: **a harness upgrade now requires bumping these ranges**, and `node scripts/dependency-skew.measure.mjs --profile <DSH_HOME>/profiles/web` (expect `SKEW_COUNT=0`) is the check that tells you when. Ranges take effect at install time only — reinstall and restart the GUI before re-measuring. `@deepseek-ai/dsh-client-ui-slots` is intentionally absent: the `slots` service is seeded by the web shell, so a npm peer declaration was dead weight. Verified: a clean install of the packed tarball resolves all imports without any local junction. Two install-side tools back this up (they need an external checkout/profile, so they are not CI jobs — see `docs/agents/integration-contracts.md` §D/§E/§F):
 
 ```bash
 node scripts/dependency-skew.measure.mjs --profile <DSH_HOME>/profiles/web   # §F: 期望 SKEW_COUNT=0
@@ -240,11 +264,38 @@ Each section's rendered text is a fixed part of the request prefix while its set
 
 ---
 
+
+### Migrating from the old `settings.yaml` (0.1.6 → 0.1.7)
+
+Up to 0.1.6 this plugin kept its user data in namespaces inside `<DSH_HOME>/settings.yaml`. When 0.1.7 boots, it renames that file to `settings.yaml.imported` and imports **only** sections whose name equals a live entry id; this plugin's old namespaces (`session-identity`, …) match no entry id, so they are refused and left untouched in `settings.yaml.imported`.
+
+Migration map (old section → new config path); a single pass moves everything:
+
+| Old `settings.yaml` section | New config path |
+|---|---|
+| `session-identity.default` / `.sessions` | `identity.default` / `identity.sessions` |
+| `global-prompt.{enabled,content,files}` | `globalPrompt.{enabled,content,files}` |
+| `workspace-prompt.{workspaces,removed}` | `workspacePrompt.{workspaces,removed}` |
+| `session-auto-resume.sessions` | `autoResume.sessions` |
+| `session-toolkit-ui.*` | `client.*` (same defaults; usually nothing to move) |
+| `workspace-registry-active`, `prompt-file-status` | **Discard**: runtime projections, now served by `GET /api/session-toolkit/state` |
+
+Two ways to land it, pick one:
+
+1. **Settings page**: open the `dsh-session-toolkit` entry in Plugins and paste the old values into the matching fields (the form writes them into the profile patch).
+2. **Edit the profile patch directly** (handy for bulk moves): append a `- id: session-toolkit` item to `<DSH_HOME>/profiles/<profile>/cordis.patch.yml` and put the right-hand paths above under `config:`. Validate the shape first with the plugin's own `Config`:
+
+   ```js
+   import plugin from 'dsh-session-toolkit'   // or import the checkout's lib/index.js
+   plugin.Config(migratedConfig)              // throws when the shape is wrong
+   ```
+
+---
 ## Mechanisms and Red Lines
 
 - **Identity injection** uses a single global section whose text provider resolves per agent — no per-agent registration, no lifecycle churn, real-time on settings change.
-- **Frozen-settings rule (red line)** — DSH's `ctx.settings.register(...).scope.get()` returns a value **frozen by `deepFreeze`** (immutable). Any host write to a scope must **first `{ ... }` copy the object (and `.slice()` arrays) into a mutable object, then use `update()`** (the register scope has `get`/`watch`/`update`/`replace`, **no `set`**); writing to the frozen object directly throws `object is not extensible` (this was the root cause of the "workspace list empty" bug fixed here). On the client side, `settingsScope.bind().set(field, value)` is used (the client scope supports `set`). The same `{ ... }` copy rule applies on the client for `workspace-prompt` writes (`onWsFilesChange` / `save` / `saveWsEnabled` / `removeWorkspace`).
-- **Referenced files are read live and failures are skipped** — `readPromptFiles` runs inside the prompt `text()` on every assembly; a failing file never breaks assembly and its status is recorded in `prompt-file-status` for the UI.
+- **Frozen-config rule (red line)** — a `volatile` field's `ref.get()` returns a **`deepFreeze` snapshot** (immutable). Anything that edits it must **first `{ ... }` copy (and `.slice()` arrays)**: the host half hands the new value to `ctx.get('settings').update(...)`, the browser half hands it to the form's `set` / `mutate` (which submit by config path instead of replacing the whole section). Writing to the frozen object directly throws `object is not extensible` (this was the root cause of the "workspace list empty" bug fixed here). The same `{ ... }` copy rule applies on the client for `workspacePrompt.workspaces` writes (`onWsFilesChange` / `save` / `saveWsEnabled` / `removeWorkspace`).
+- **Referenced files are read live and failures are skipped** — `readPromptFiles` runs inside the prompt `text()` on every assembly; a failing file never breaks assembly and its status is recorded into the in-process projection served by `GET /api/session-toolkit/state` and shown by the settings page.
 - **Auto-resume never calls `dispose()`** — `AgentHandle.dispose()` removes the session from storage; turning a switch off only affects the next restart, it never takes a live session down.
 - **Restart is UAC-free by construction** — the spawn inherits the server process token (SYSTEM or user), so `taskkill` targets a same-privilege process and the script's elevated branch (the only UAC source) is unreachable. If port 3080 is held by another program, an elevated retry may still appear (documented in the restart script).
 - **Shadowing is cell-based** — the utilities entry re-registers the stock `session-log-download` cell at a lower priority; the stock entry abdicates gracefully if the shadow crashes.
@@ -255,6 +306,7 @@ Each section's rendered text is a fixed part of the request prefix while its set
 ## Known Limitations and Deferred Work
 
 - Client half is a hand-maintained single-file IIFE bundle; adding a feature touches both `lib/` and `client/client.js`.
+- **Icon names are part of the integration surface.** DSH 0.1.7 renamed the `@deepseek-ai/dsh-client-ui-primitives` icons from `IconXxxOutline<size>` to `IconXxxOutlineRegular` / `IconXxxOutlineMedium` (1 px vs 1.3 px stroke; the artwork keeps the old default `size`), so the client half must use the **target harness's** names. A name that no longer exists evaluates to `undefined` and `React.createElement(undefined, …)` throws, which blanks that component's subtree **while its navigation entry still appears** (registration and rendering are separate). Every other gate stays green on this — syntax, packaging and the anchor gate all passed. Gate it with `node scripts/primitives-export.assert.mjs --harness <checkout>`: exit 1 lists every member the plugin references that the installed harness does not export.
 - The relocated Session-log entry depends on the official `sessionLogDownload` controller interface **and** mirrors the 0.1.6 official surface (a "⋯ More actions" menu). It is a frozen replica: run `node scripts/dsh-log-ui.drift.mjs --harness <checkout>` after a DSH upgrade — it audits both sides for the same anchors and exits non-zero on drift (§E).
 - Loose emphasis matching in `toPlainText` can drop `*` pairs in non-format positions (e.g. `a * b * c`); acceptable for agent-generated messages, boundary tightening is optional.
 - The aggregate `inject` union waits for every listed service; a profile missing one service delays the whole package (web profile provides all of them today).
@@ -262,7 +314,8 @@ Each section's rendered text is a fixed part of the request prefix while its set
 - `ctx.get('agentDefaultModel')`, `sessionTitle` and `workspaceRegistry` are resolved lazily at call time and degrade to `cwd`/path addressing; `tools` and `webServer` are awaited through `ctx.inject` so a late-arriving service cannot silently disable a feature (the loader creates entries concurrently, so apply-time `ctx.get` had no ordering guarantee).
 - **Restart probe window** — a restart is only detected when the health probe fails for `restartFailThreshold × restartPollMs` (default 2 × 1000 ms = 2 s) and then recovers. If a relaunch completes in under that window, the overlay can misreport "no restart detected" (`noRestart`); lowering `restartFailThreshold` to 1 makes detection more sensitive but also lets a single transient failure masquerade as a restart interruption.
 - **Referenced files are warmed on the assembly path** — `readPromptFiles` runs a `statSync` per referenced file on every assembly and reads only when `mtimeMs`/size changed; the per-file and total byte budgets prevent a huge file from blocking assembly or inflating the prompt, and the status projection is written only on change. On the client, `files` are saved immediately (`onWsFilesChange` / `save`).
-- **UI knobs are read from `session-toolkit-ui`** — because the harness gives client entries no config channel and no schemastery, the browser half cannot validate or receive `config.client` directly; the host mirrors it into the settings namespace (see [Configuration validation](#configuration-validation)) and the client falls back to frozen defaults when the namespace is unavailable.
+- **UI knobs come from the same entry's `client.*`** — the browser half reads those fields through `configForms.get('session-toolkit')` and falls back to the frozen `UI_FALLBACK` when the form is unavailable. A client entry still receives no cordis row config, but reading settings no longer needs a host mirror: one entry `Config` is visible to both sides.
+- **Minimum harness version is `dsh-v0.1.7-alpha.1`** — the settings data plane became entry-`Config` `volatile` fields plus `configForms` in 0.1.7. On 0.1.6 and earlier there is no `configForms`, so the client entry stays `pending` and the web client reports `Failed to load plugins`; that is a deliberate loud failure (hard inject), not a silent degradation.
 
 ---
 

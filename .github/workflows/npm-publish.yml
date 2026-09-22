@@ -119,6 +119,10 @@ jobs:
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
+    # 注：本仓库的既成约定是「**契约门**挂 needs，**探测器**只挂 selftest job 内的步骤」。
+    #     `scripts/clamp-call.assert.mjs` 经裁定归**探测器**（文本级调用计数、别名可绕、红在合法重构下
+    #     属设计如此），故它不接进本 workflow；它挂 package.json 的 assert:clamp / assert:clamp:selftest，
+    #     由「改 client/client.js 钳制段时必跑」的流程项约束（人监督清单项，同 §D.3 改行号重核）。
     needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract]
     # 只有释放事件才发布；push / PR / 手动触发只跑验证门。
     if: github.event_name == 'release'

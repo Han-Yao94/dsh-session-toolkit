@@ -6,14 +6,15 @@ window.__ModuleLoader__.load({
     // dsh-dev 整合包 client 半：5 个功能模块内联（IIFE 隔离变量），统一 apply 顺序注册
     var registered = {};
     function collect(tag, applyFn) { registered[tag] = applyFn; }
-    // UI 旋钮：**不再**走 cordis 行配置——client 条目由 client-modules 以 loader.create({ name })
-    // 创建，boot graph 行只有 id/url/rev/inject/immediately/external，没有任何 config 字段，
-    // bundle 也拿不到 schemastery（不在平台模块表）因而导出不了自己的 Config。
-    // 唯一通道是 host 注册的 settings 命名空间 `session-toolkit-ui`（见 lib/ui-config.js）：
-    // host 把插件行 config.client.* 当组合 base，浏览器侧 apply 时 bind 并读快照。
-    // 命名空间不可用时用这份兜底值（= 历史默认值，行为零变化）。
-    // 【提醒】新增旋钮必须同步三处：lib/index.js 的 Config.client、lib/ui-config.js、本 UI_FALLBACK。
-    var UI_NAMESPACE = 'session-toolkit-ui';
+    // 设置通道（DSH 0.1.7 起）：用户数据（身份文本、全局/工作区提示词、自动上线开关、UI 旋钮）
+    // 是本插件条目 config 的 volatile 字段，浏览器半经 `ctx.configForms.get('session-toolkit')`
+    // 读写——configForms 由 web 组合的 ui-settings 客户端半提供，写入落盘在当前 profile 的
+    // cordis.patch.yml（不再是 settings.yaml 的命名空间，也没有 settingsScope 服务）。
+    // 表单不可用（服务缺席/不兼容内核）时，各模块用这份兜底值保持行为不变。
+    // 【提醒】新增旋钮必须同步两处：lib/index.js 的 Config.client、本 UI_FALLBACK。
+    var ENTRY_ID = 'session-toolkit';
+    var SETTINGS_SERVICE = 'configForms';
+    var STATE_URL = '/api/session-toolkit/state';
     var UI_FALLBACK = {
       identityCharLimit: 4000,
       restartTimeoutMs: 90000,
@@ -24,10 +25,129 @@ window.__ModuleLoader__.load({
       copyFeedbackMs: 1600,
     };
     var uiCfg = Object.assign({}, UI_FALLBACK);
-    function readUiCfg(scope) {
-      if (!scope) return;
-      var snap = scope.getSnapshot();
-      var v = (snap && snap.value && typeof snap.value === 'object') ? snap.value : null;
+
+    // 本插件的配置表单（configForms 服务缺席/条目无 volatile 字段时返回 null）。
+    function configForm(ctx) {
+      var forms = ctx.get(SETTINGS_SERVICE);
+      if (!forms || typeof forms.get !== 'function') return null;
+      try { return forms.get(ENTRY_ID); } catch (e) { return null; }
+    }
+
+    // 把表单里的一段子对象适配成旧 scope 形状（getSnapshot/subscribe/set/unset/mutate），
+    // 使各功能模块的读写代码保持不变：
+    //   getSnapshot().value = 该子对象（config.<basePath...>）；set(key, v) 写 basePath + key。
+    function sectionOf(form, basePath) {
+      if (!form) return null;
+      function sub(value) {
+        var cur = value;
+        for (var i = 0; i < basePath.length; i++) {
+          if (!cur || typeof cur !== 'object') return undefined;
+          cur = cur[basePath[i]];
+        }
+        return cur;
+      }
+      function pathOf(op) {
+        return { op: op.op, path: basePath.concat(op.path), value: op.value };
+      }
+      return {
+        getSnapshot: function () {
+          var snap = form.getSnapshot();
+          return {
+            status: snap ? snap.status : 'unavailable',
+            value: snap ? sub(snap.value) : undefined,
+            revision: snap ? snap.revision : undefined,
+            writable: snap ? snap.writable : false,
+            mode: snap ? snap.mode : undefined,
+          };
+        },
+        subscribe: function (listener) { return form.subscribe(listener); },
+        set: function (key, value) { return form.mutate([{ op: 'set', path: basePath.concat([key]), value: value }]); },
+        unset: function (key) { return form.mutate([{ op: 'unset', path: basePath.concat([key]) }]); },
+        mutate: function (ops, revision) { return form.mutate(ops.map(pathOf), revision); },
+      };
+    }
+
+    // 只读运行时投影（活跃工作区 + 引用文件读取状态）：host 经 GET STATE_URL 提供
+    // （见 lib/global-prompt.js 的 STATE_ROUTE），浏览器按订阅数轮询，无人订阅即停。
+    // 这两项是 host 运行时状态而非用户配置，故不走 settings 表单。
+    var stateStore = (function () {
+      var POLL_MS = 2000;
+      var snapshot = { status: 'loading', value: { active: [], fileStatus: { byScope: {} } } };
+      var listeners = [];
+      var cancelTimer = null;
+      var inFlight = false;
+      function emit() {
+        var list = listeners.slice();
+        for (var i = 0; i < list.length; i++) {
+          try { list[i](); } catch (e) { console.warn('[dsh-session-toolkit] state listener failed', e); }
+        }
+      }
+      function refresh() {
+        if (inFlight || typeof fetch !== 'function') return Promise.resolve();
+        inFlight = true;
+        return fetch(STATE_URL, { method: 'GET', cache: 'no-store' }).then(function (res) {
+          if (!res || !res.ok) throw new Error('state route returned ' + (res ? res.status : 'no response'));
+          return res.json();
+        }).then(function (body) {
+          snapshot = {
+            status: 'ready',
+            value: {
+              active: body && Array.isArray(body.active) ? body.active : [],
+              fileStatus: (body && body.fileStatus && typeof body.fileStatus === 'object') ? body.fileStatus : { byScope: {} },
+            },
+          };
+        }).catch(function (e) {
+          // 路由不可用（host 半未加载 / 非 web 承载）：停止轮询，UI 保持空列表与「未读取」状态
+          if (snapshot.status === 'loading') snapshot = { status: 'unavailable', value: snapshot.value };
+          console.warn('[dsh-session-toolkit] state route unavailable: ' + (e && e.message ? e.message : String(e)));
+        }).then(function () {
+          inFlight = false;
+          emit();
+        });
+      }
+      function poll(ctx) {
+        cancelTimer = ctx.timeout(function () {
+          cancelTimer = null;
+          refresh().then(function () { if (listeners.length > 0) poll(ctx); });
+        }, POLL_MS);
+      }
+      return {
+        getSnapshot: function () { return snapshot; },
+        subscribe: function (ctx, listener) {
+          listeners.push(listener);
+          if (listeners.length === 1 && typeof ctx.timeout === 'function') {
+            refresh().then(function () { if (listeners.length > 0) poll(ctx); });
+          }
+          return function () {
+            var idx = listeners.indexOf(listener);
+            if (idx === -1) return;
+            listeners.splice(idx, 1);
+            if (listeners.length === 0 && cancelTimer) { cancelTimer(); cancelTimer = null; }
+          };
+        },
+      };
+    })();
+
+    // 运行时投影的两个只读读面，形状对齐被替换掉的 settings 命名空间（value.active / value.byScope）。
+    function runtimeScope(ctx, field) {
+      return {
+        getSnapshot: function () {
+          var snap = stateStore.getSnapshot();
+          return {
+            status: snap.status,
+            value: field === 'fileStatus' ? { byScope: snap.value.fileStatus.byScope } : { active: snap.value.active },
+          };
+        },
+        subscribe: function (listener) { return stateStore.subscribe(ctx, listener); },
+      };
+    }
+
+    // UI 旋钮来自本条目 config 的 client.* 字段（表单快照）；缺失时保持兜底值。
+    function readUiCfg(form) {
+      if (!form) return;
+      var snap = form.getSnapshot();
+      var root = (snap && snap.value && typeof snap.value === 'object') ? snap.value : null;
+      var v = (root && root.client && typeof root.client === 'object') ? root.client : null;
       if (!v) return;
       Object.keys(UI_FALLBACK).forEach(function (key) {
         if (typeof v[key] === 'number' && isFinite(v[key]) && v[key] > 0) uiCfg[key] = v[key];
@@ -837,12 +957,12 @@ window.__ModuleLoader__.load({
   }
 
   function apply(ctx, cfg) {
-    // cfg 即 uiCfg（session-toolkit-ui 快照 / 兜底默认值），字符上限在使用处读取。
+    // cfg 即 uiCfg（client.* 表单快照 / 兜底默认值），字符上限在使用处读取。
     injectCss();
     var locale = ctx.get('locale');
     var slots = ctx.get('slots');
-    var settingsScope = ctx.get('settingsScope');
-    if (!slots || !settingsScope) return;
+    var form = configForm(ctx);
+    if (!slots || !form) return;
 
     var t = function (key) { return zh[key] || key; };
     if (locale) {
@@ -850,10 +970,9 @@ window.__ModuleLoader__.load({
       t = locale.bind(NS);
     }
 
-    var scope = settingsScope.bind({ namespace: 'session-identity' });
-    // 自动上线开关命名空间（dsh-auto-resume host 注册）；bind 失败/未注册时开关行隐藏
-    var autoResumeScope = null;
-    try { autoResumeScope = settingsScope.bind({ namespace: 'session-auto-resume' }); } catch (e) { autoResumeScope = null; }
+    var scope = sectionOf(form, ['identity']);
+    // 自动上线开关：本条目 config 的 autoResume.sessions（host 半 dsh-auto-resume 读写同一份）
+    var autoResumeScope = sectionOf(form, ['autoResume']);
     slots.inject('conversation.session.header.actions', function () {
       return slots.register({
         name: 'conversation.session.header.actions',
@@ -974,7 +1093,7 @@ window.__ModuleLoader__.load({
   ].join('\n');
 
   var name = 'dsh-session-identity';
-  var inject = ['slots', 'locale', 'settingsScope', 'timer'];
+  var inject = ['slots', 'locale', 'configForms', 'timer'];
 collect('identity', apply);
   exports.name = name;
     })();
@@ -1267,7 +1386,7 @@ collect('identity', apply);
     var areaId = 'dsw-ws-' + path;
 
     return React.createElement(primitives.DisclosureRow, {
-      icon: React.createElement(primitives.IconFolderOpenOutline16, { size: 16 }),
+      icon: React.createElement(primitives.IconFolderOpenOutlineRegular, { size: 16 }),
       title: rowTitle,
       open: open,
       expandable: true,
@@ -1360,6 +1479,18 @@ collect('identity', apply);
     var gLastSavedRef = useRef({ enabled: gInitial.enabled === true, content: typeof gInitial.content === 'string' ? gInitial.content : '' });
     var gFilesState = useState(Array.isArray(gInitial.files) ? gInitial.files : []);
     var gFiles = gFilesState[0], setGFiles = gFilesState[1];
+    // 活跃工作区与引用文件状态来自 host 只读路由的轮询（见 factory 顶部 stateStore）：
+    // 订阅它，数据到达 / 刷新时才重渲染本页与各行。
+    var stateTick = useState(0);
+    useEffect(function () {
+      var bump = function () { stateTick[1](function (x) { return x + 1; }); };
+      var offActive = activeScope ? activeScope.subscribe(bump) : null;
+      var offFiles = fsStatusScope ? fsStatusScope.subscribe(bump) : null;
+      return function () {
+        if (offActive) offActive();
+        if (offFiles) offFiles();
+      };
+    }, []);
     var fileSnap = fsStatusScope ? fsStatusScope.getSnapshot() : null;
     var fileVal = (fileSnap && fileSnap.value && typeof fileSnap.value === 'object') ? fileSnap.value : {};
     var gFileStatus = (fileVal.byScope && Array.isArray(fileVal.byScope.global)) ? fileVal.byScope.global : [];
@@ -1528,7 +1659,7 @@ collect('identity', apply);
         React.createElement('header', { className: 'dsw-head' },
           React.createElement('div', { className: 'dsw-title-row' },
             React.createElement('div', { className: 'dsw-title-group' },
-              React.createElement(primitives.IconGlobeOutline14, { size: 18 }),
+              React.createElement(primitives.IconGlobeOutlineRegular, { size: 18 }),
               React.createElement('h1', { className: 'dsw-title' }, t('title'))),
             React.createElement(primitives.Pill, { active: gEnabled, className: 'dsw-badge' + (gEnabled ? ' dsw-badge-on' : ' dsw-badge-off') }, gEnabled ? t('badgeOn') : t('badgeOff'))),
           React.createElement('p', { className: 'dsw-desc' }, t('desc'))),
@@ -1568,7 +1699,7 @@ collect('identity', apply);
           : React.createElement('div', { className: 'dsw-workspace' },
               rows.length === 0
                 ? React.createElement('div', { className: 'dsw-empty' },
-                    React.createElement(primitives.IconArchiveOutline20, { size: 20 }),
+                    React.createElement(primitives.IconArchiveOutlineRegular, { size: 20 }),
                     React.createElement('div', { className: 'dsw-empty-title' }, t('emptyWorkspaces')),
                     React.createElement('div', { className: 'dsw-empty-hint' }, t('emptyHint')))
                 : React.createElement('div', { className: 'dsw-ws-list' }, rows.map(function (item) {
@@ -1587,12 +1718,12 @@ collect('identity', apply);
   }
 
   function apply(ctx, cfg) {
-    // cfg 即 uiCfg（session-toolkit-ui 快照 / 兜底默认值），字符上限在使用处读取。
+    // cfg 即 uiCfg（client.* 表单快照 / 兜底默认值），字符上限在使用处读取。
     injectCss();
     var locale = ctx.get('locale');
     var slots = ctx.get('slots');
-    var settingsScope = ctx.get('settingsScope');
-    if (!slots || !settingsScope) return;
+    var form = configForm(ctx);
+    if (!slots || !form) return;
 
     var t = function (key) { return zh[key] || key; };
     if (locale) {
@@ -1600,13 +1731,11 @@ collect('identity', apply);
       t = locale.bind(NS);
     }
 
-    var scope = settingsScope.bind({ namespace: 'global-prompt' });
-    var wsScope = null;
-    try { wsScope = settingsScope.bind({ namespace: 'workspace-prompt' }); } catch (e) { wsScope = null; }
-    var fsStatusScope = null;
-    try { fsStatusScope = settingsScope.bind({ namespace: 'prompt-file-status' }); } catch (e) { fsStatusScope = null; }
-    var activeScope = null;
-    try { activeScope = settingsScope.bind({ namespace: 'workspace-registry-active' }); } catch (e) { activeScope = null; }
+    // 全局/工作区提示词 = 本条目 config 的两段；活跃工作区与引用文件状态 = host 只读状态路由
+    var scope = sectionOf(form, ['globalPrompt']);
+    var wsScope = sectionOf(form, ['workspacePrompt']);
+    var fsStatusScope = runtimeScope(ctx, 'fileStatus');
+    var activeScope = runtimeScope(ctx, 'active');
     slots.inject('settings.section', function () {
       return slots.register({
         name: 'settings.section',
@@ -1693,8 +1822,8 @@ collect('identity', apply);
   ].join('\n');
 
   var name = 'dsh-global-prompt';
-  var inject = ['slots', 'locale', 'settingsScope', 'timer'];
-  collect('global-prompt', apply);
+  var inject = ['slots', 'locale', 'configForms', 'timer'];
+collect('global-prompt', apply);
   exports.name = name;
     })();
 
@@ -2083,7 +2212,7 @@ collect('web-restart', apply);
             items: [{
               id: 'download',
               label: t('menu.download'),
-              icon: react_jsx_runtime.jsx(primitives.IconDownloadOutline16, {}),
+              icon: react_jsx_runtime.jsx(primitives.IconDownloadOutlineRegular, { size: 16 }),
               disabled: busy,
             }],
             onSelect: function () { setOpen(false); void request(sessionId); },
@@ -2095,7 +2224,7 @@ collect('web-restart', apply);
               'aria-expanded': open,
               'aria-busy': busy,
               onClick: function () { setOpen(function (value) { return !value; }); },
-              children: react_jsx_runtime.jsx(primitives.IconEllipsisOutline16, {}),
+              children: react_jsx_runtime.jsx(primitives.IconEllipsisOutlineRegular, { size: 16 }),
             }),
           }),
           react_jsx_runtime.jsx(SessionLogDownloadDialog, Object.assign({}, props)),
@@ -2209,8 +2338,8 @@ collect('log-reposition', apply);
           cursor: 'pointer'
         },
         children: copied
-          ? react_jsx_runtime.jsx(primitives.IconCheckOutline16, {})
-          : react_jsx_runtime.jsx(primitives.IconCopyOutline16, {})
+          ? react_jsx_runtime.jsx(primitives.IconCheckOutlineRegular, { size: 16 })
+          : react_jsx_runtime.jsx(primitives.IconCopyOutlineRegular, { size: 16 })
       });
     }
 
@@ -2242,26 +2371,21 @@ collect('peer-message', apply);
     })();
 
     function apply(ctx) {
-      // UI 旋钮通道：bind 命名空间并立即读一次（镜像可能还在 loading，此时保持兜底值；
-      // subscribe 在快照到达后补齐）。scope 生命周期随本插件 fiber。
-      var settingsScope = ctx.get('settingsScope');
-      if (settingsScope) {
-        try {
-          var uiScope = settingsScope.bind({ namespace: UI_NAMESPACE });
-          if (uiScope) {
-            readUiCfg(uiScope);
-            ctx.effect(function () {
-              return uiScope.subscribe(function () { readUiCfg(uiScope); });
-            }, 'dsh-session-toolkit: ui config');
-          }
-        } catch (e) { /* 命名空间不可用 → 保持 UI_FALLBACK */ }
+      // UI 旋钮 = 本条目 config 的 client.* 字段：先读一次（表单可能仍在 loading，此时保持
+      // 兜底值），再订阅补齐。订阅生命周期随本插件 fiber。
+      var form = configForm(ctx);
+      if (form) {
+        readUiCfg(form);
+        ctx.effect(function () {
+          return form.subscribe(function () { readUiCfg(form); });
+        }, 'dsh-session-toolkit: ui config');
       }
       var clientCfg = uiCfg;
       Object.keys(registered).forEach(function (tag) {
         try { registered[tag](ctx, clientCfg); } catch (e) { console.warn('[dsh-session-toolkit] client module ' + tag + ' apply failed: ' + (e && e.message ? e.message : String(e))); }
       });
     }
-    var inject = ['slots', 'locale', 'settingsScope', 'timer'];
+    var inject = ['slots', 'locale', 'configForms', 'timer'];
     exports.apply = apply;
     exports.inject = inject;
     return module.exports;

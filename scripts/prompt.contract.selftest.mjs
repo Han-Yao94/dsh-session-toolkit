@@ -9,7 +9,9 @@
  *      旧内核（无该字段）才退化为 sanitize 的空格化兜底——两种内核下都不得让 `{{...}}`
  *      变成未注册变量引用而抛错。
  *   C. global-prompt 的引用文件读取与状态投影：超大文件不注入只报 fail；文件未变时
- *      **不重复写 settings**（settings.update 会持久化整份 settings.yaml）。
+ *      **不重建状态投影**（状态每个模型步都重算，值没变就不该换引用/内容）。
+ *      用户数据（启用开关 + 文本 + 引用文件）是本条目 config 的 volatile 字段，
+ *      运行时投影（引用文件状态、活跃工作区）经 GET /api/session-toolkit/state 送给浏览器半。
  *
  * 每条断言都必须能报红：脚本在 os.tmpdir() 的副本上还原历史缺陷（去重吃空行、按字面渲染缺失），
  * 对应断言必须变为失败。副本与临时文件都不落工作区。
@@ -169,37 +171,72 @@ const negLiteral = await promptChecks(path.join(negLiteralDir, 'lib'))
 check('负向对照：去掉按字面渲染判断后，文本保真断言报红', negLiteral.literalKept === false)
 
 // ------------------------------------------------------------------ C：引用文件读取 + 写入抑制
+/** 最小 volatile 引用桩：被测代码只调 .get()（写入方是 settings 表单，不在本门内）。 */
+function volatileRef(value) {
+  const ref = { get() { return ref.value }, set(next) { ref.value = next } }
+  ref.value = value
+  return ref
+}
+
 function makeGlobalPromptCtx() {
-  const scopes = {}
+  const refs = {
+    enabled: volatileRef(false),
+    content: volatileRef(''),
+    files: volatileRef([]),
+    workspaces: volatileRef({}),
+    removed: volatileRef([]),
+  }
   const sections = []
-  const updates = []
+  const routes = []
+  const workspaceWrites = []
+  const webServer = {
+    register(spec) {
+      routes.push(spec)
+      return () => {}
+    },
+  }
+  const childCtx = {
+    get(name) { return name === 'webServer' ? webServer : undefined },
+    effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {} },
+  }
   const ctx = {
-    settings: {
-      register(ns) {
-        scopes[ns] = scopes[ns] || { value: undefined }
-        return {
-          get() { return scopes[ns].value },
-          watch() { return () => {} },
-          update(patch) { updates.push({ ns, patch }); return Promise.resolve() },
-          replace() { return Promise.resolve() },
-        }
-      },
+    // 本插件不再注册 settings 命名空间：用户数据是本条目 config 的 volatile 字段；
+    // 「活跃工作区同步补回缺失路径」经 ctx.get('settings').update(条目 id, patch) 写回 config。
+    get(name) {
+      if (name !== 'settings') return undefined
+      return { update(ns, patch) { workspaceWrites.push({ ns, patch }); return Promise.resolve() } }
     },
     systemPrompt: { section(s) { sections.push(s); return () => {} } },
     agents: { roots() { return [] } },
-    inject() { return () => {} },
+    inject(names, cb) { if (names.indexOf('webServer') !== -1) cb(childCtx); return () => {} },
     effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {} },
     on() {},
     timeout() { return () => {} },
   }
-  return { ctx, scopes, sections, updates }
+  return { ctx, refs, sections, routes, workspaceWrites }
+}
+
+/** 调一次只读状态路由，取回它写给浏览器的 JSON 文本（字面比较，避免把解析结果当同一对象）。 */
+function readStateText(routes) {
+  const route = routes.find((r) => r.path === '/api/session-toolkit/state')
+  if (route === undefined) throw new Error('状态路由 /api/session-toolkit/state 未注册')
+  let body
+  const res = {
+    writeHead() { return res },
+    end(text) { body = text },
+  }
+  route.handler({ method: 'GET' }, res)
+  return body
 }
 
 async function globalPromptChecks() {
   const root = copyLib('global-prompt')
   const mod = await import(pathToFileURL(path.join(root, 'lib/global-prompt.js')).href)
-  const { ctx, scopes, sections, updates } = makeGlobalPromptCtx()
-  mod.apply(ctx, { maxFileBytes: 64, maxTotalBytes: 128 })
+  const { ctx, refs, sections, routes } = makeGlobalPromptCtx()
+  mod.apply(ctx, {
+    global: { maxFileBytes: 64, maxTotalBytes: 128, enabled: refs.enabled, content: refs.content, files: refs.files },
+    workspace: { workspaces: refs.workspaces, removed: refs.removed },
+  })
 
   const globalSection = sections.find((s) => s.name === 'global-prompt')
   if (globalSection === undefined) throw new Error('global-prompt 段未注册')
@@ -210,31 +247,32 @@ async function globalPromptChecks() {
   writeFileSync(small, 'hello {{braces}}')
   writeFileSync(big, 'x'.repeat(200))
 
-  scopes['global-prompt'].value = { enabled: true, content: 'Base', files: [small] }
+  refs.enabled.set(true)
+  refs.content.set('Base')
+  refs.files.set([small])
   const first = globalSection.text({})
-  const afterFirst = updates.length
+  const stateAfterFirst = readStateText(routes)
   globalSection.text({})
-  const afterSecond = updates.length
+  const stateAfterSecond = readStateText(routes)
 
   // 内容变化（size/mtime 变化）后必须重读并重新投影
   writeFileSync(small, 'hello {{braces}} v2')
   const future = new Date(Date.now() + 2000)
   utimesSync(small, future, future)
-  scopes['global-prompt'].value = { enabled: true, content: 'Base', files: [small] }
   const third = globalSection.text({})
-  const afterThird = updates.length
+  const stateAfterThird = readStateText(routes)
 
-  scopes['global-prompt'].value = { enabled: true, content: 'Base', files: [big] }
+  refs.files.set([big])
   const fourth = globalSection.text({})
-  const lastStatus = updates.length > 0 ? updates[updates.length - 1].patch.byScope.global[0] : undefined
+  const lastStatus = JSON.parse(readStateText(routes)).fileStatus.byScope.global[0]
 
   rmSync(dir, { recursive: true, force: true })
   rmSync(root, { recursive: true, force: true })
   return {
     literal: globalSection.interpolate === false,
     noSanitize: first === 'Base\nhello {{braces}}',
-    writeSuppressed: afterSecond === afterFirst,
-    refreshed: afterThird > afterSecond && third.indexOf('v2') !== -1,
+    projectionStable: stateAfterSecond === stateAfterFirst,
+    refreshed: stateAfterThird !== stateAfterSecond && third.indexOf('v2') !== -1,
     oversized: fourth === 'Base' && lastStatus !== undefined && lastStatus.status === 'fail',
   }
 }
@@ -242,7 +280,7 @@ async function globalPromptChecks() {
 const gp = await globalPromptChecks()
 check('global-prompt 段声明 interpolate:false', gp.literal)
 check('引用文件内容按原文注入（不再空格化花括号）', gp.noSanitize)
-check('文件未变时不重复写 settings（写入抑制）', gp.writeSuppressed)
+check('文件未变时状态投影不重建（同一份 JSON）', gp.projectionStable)
 check('文件变化后重读并重新投影', gp.refreshed)
 check('超大文件判 fail 且不注入', gp.oversized)
 
