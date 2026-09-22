@@ -116,6 +116,29 @@ jobs:
           node-version: 20
       - run: node scripts/prompt.contract.selftest.mjs
 
+  request-guard:
+    # Origin 守卫门（`lib/request-guard.js`）：47 条用例（四种输入 × 两种绑定模式）× 4 条结构断言
+    # × 7 条变异 × 真 originGuard 挂临时 HTTP 服务器的薄层。`--selftest` 必须带：只跑真实对照
+    # 就漏掉了「门自己还能不能红」这半边（D1 = 谁把 `!== ALL_INTERFACES_BIND` 翻回等值判断即红）。
+    #
+    # 为什么本门**可以**挂 CI（与 §D 步骤 10 那两条「不挂 CI」的门不同）：它**不需要任何外部输入** ——
+    # 不读已装 profile、不读 harness checkout、不打活端口，全部靠自起临时服务器与纯函数；
+    # 故在只有插件仓库的 CI 里也能给出真判定，**不会**退化成「未完成验证」的假红。
+    # （对照：dependency-skew 要 `<DSH_HOME>/profiles/web`、dsh-log-ui.drift 要 harness checkout ⇒ 那两条不挂。）
+    #
+    # 为什么这条断言值得占一个 CI job（2026-09-22 的实证）：手动跑的门靠人的自觉，挂 CI 的门在人
+    # 不自觉时会红。而「把条件翻回等值判断」这种改动最容易藏在一次看似无关的重构里 ⇒ D1 那条断言的
+    # 价值**只有挂上 CI 才兑现**。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/request-guard.assert.mjs --selftest
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
@@ -123,7 +146,16 @@ jobs:
     #     `scripts/clamp-call.assert.mjs` 经裁定归**探测器**（文本级调用计数、别名可绕、红在合法重构下
     #     属设计如此），故它不接进本 workflow；它挂 package.json 的 assert:clamp / assert:clamp:selftest，
     #     由「改 client/client.js 钳制段时必跑」的流程项约束（人监督清单项，同 §D.3 改行号重核）。
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard]
+    # ⚠️ `request-guard` **加入 needs**（D 的判断，理由如下，与"探测器不挂 needs"的既有约定不冲突）：
+    #   本仓库的判据是「**契约门**挂 needs、**探测器**只挂 selftest job 内的步骤」，而分界的实质是
+    #   **红是否可被合理驳回**：
+    #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），
+    #       把可讨论的红接到发布路径上会训练人忽略红 ⇒ 不进 needs（裁定 #53）。
+    #     · 本门属**契约门** —— 它的红（`lib/request-guard.js` 的判定与契约不符、或门自身不再能红）
+    #       **只有一个动作**：修它。没有"这次可以放过"的合法理由。
+    #   ⇒ **一次安全回归不该被发布出去**：把它接在发布路径上，代价是"发布被挡住一次"，
+    #     而漏放的代价是"两道路由的来源判定失效且没人知道"。两者不对称，故选挡。
     # 只有释放事件才发布；push / PR / 手动触发只跑验证门。
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
