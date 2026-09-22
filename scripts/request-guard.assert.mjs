@@ -131,6 +131,13 @@ const CASES = [
   ['B2 0.0.0.0 + evil 域自洽 ⇒ 放行（残余限制：无"名字"可判别）', { host: 'evil.com:3080', origin: 'http://evil.com:3080' }, ALL_INTERFACES, true, 'same-origin'],
   ['B3 0.0.0.0 + Origin≠Host ⇒ 拒', { host: 'evil.com:3080', origin: 'http://other.example' }, ALL_INTERFACES, false, 'origin-mismatch'],
   ['B4 0.0.0.0 + 缺 Host ⇒ 拒', { origin: 'http://x.example' }, ALL_INTERFACES, false, 'no-host'],
+  // ⭐ 这一格必须**按绑定模式分开测**（2026-09-22 A 揪出"从单格到全称"的越界，D 补测）：
+  //    「缺 Host ⇒ 拒 no-host」**只在非 0.0.0.0 下成立** —— 绑 0.0.0.0 时栅栏 A 整块不跑，
+  //    于是**规则 3（无 Origin ⇒ 放行）先返回**，规则 4 的 `no-host` 判定**够不着**。
+  //    ⇒ `0.0.0.0 + 缺 Host + 缺 Origin = 放行(no-origin)`；而 `loopback/缺省 + 缺 Host + 缺 Origin = 拒(no-host)`。
+  //    本行、下一行、再下一行**合起来**才是一组；把任一行单独抬成"无 Host 一律如何"都是错的。
+  ['B4b 0.0.0.0 + 缺 Host + 缺 Origin ⇒ 放行（规则 3 先返回，规则 4 够不着）', {}, ALL_INTERFACES, true, 'no-origin'],
+  ['B4c loopback + 缺 Host + 缺 Origin ⇒ 拒 no-host（与 B4b 对照 ⇒ 必须分模式测）', {}, LOOPBACK, false, 'no-host'],
   ['B5 0.0.0.0 + 畸形 Host 与畸形 Origin ⇒ 拒（先落 Origin 解析失败）', { host: 'bad host', origin: 'http://bad host' }, ALL_INTERFACES, false, 'origin-unparsable'],
   ['B5b 0.0.0.0 + 畸形 Host + 合法但不同的 Origin ⇒ 拒', { host: 'bad host', origin: 'http://evil.example' }, ALL_INTERFACES, false, 'origin-mismatch'],
   ['B6 0.0.0.0 + 端口不匹配 ⇒ 拒', { host: '127.0.0.1:9090', origin: 'http://127.0.0.1:3080' }, ALL_INTERFACES, false, 'origin-mismatch'],
@@ -172,6 +179,9 @@ const MUTANTS = [
       //    实测：0.0.0.0 下的 B3 / B4 / B5 / B6 / ①外来 Origin / ④同源 在这条变异下**不翻**
       //    （它们由规则 1 / no-host / Origin 解析各自拒绝，根本不经过栅栏 A）。
       '③无 Origin（0.0.0.0 绑定）': false,
+      // B4b 是同一机制的第二个落点：0.0.0.0 下栅栏 A 不跑 ⇒ 规则 3 先返回；
+      // 栅栏 A 变成无条件后它就会命中 no-host ⇒ 必然连带翻转（**耦合，显式登记**）。
+      'B4b 0.0.0.0 + 缺 Host + 缺 Origin ⇒ 放行（规则 3 先返回，规则 4 够不着）': false,
       'B1 0.0.0.0 + LAN IP 自洽 ⇒ 放行': false,
       'B1b 0.0.0.0 + LAN 主机名自洽 ⇒ 放行': false,
       'B2 0.0.0.0 + evil 域自洽 ⇒ 放行（残余限制：无"名字"可判别）': false,
