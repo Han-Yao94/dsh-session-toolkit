@@ -307,7 +307,7 @@ node scripts/dsh-log-ui.drift.mjs --harness <deepseek-harness 路径>          #
 
 - client 半为手工维护的单文件 IIFE 包;新增功能需同步维护 `lib/` 与 `client/client.js` 两处。
 - **图标名属于集成面。** DSH 0.1.7 把 `@deepseek-ai/dsh-client-ui-primitives` 的图标从 `IconXxxOutline<尺寸>` 改名为 `IconXxxOutlineRegular` / `IconXxxOutlineMedium`(1 px 与 1.3 px 笔画;artwork 保留旧默认 `size`),因此 client 半必须使用**目标 harness** 的名字。不存在的名字求值为 `undefined`,而 `React.createElement(undefined, …)` 会抛错,导致**该组件子树整片空白、而它的导航行照常出现**(注册与渲染是两件事)。**这一形态对其余所有门都是静默的**——语法门、打包门、锚门当时全绿。用 `node scripts/primitives-export.assert.mjs --harness <checkout>` 守它:exit 1 会逐条列出插件引用了、而已装 harness 并未导出的成员。
-- 平移的 Session log 入口依赖官方 `sessionLogDownload` controller 接口,且复刻官方 0.1.6 的「⋯ 更多操作」菜单形态;**它是冻结的复刻件**:DSH 升级后跑一次 `node scripts/dsh-log-ui.drift.mjs --harness <checkout>`——它按同一组锚点双向审计,漂移即非零退出(§E)。
+- 平移的 Session log 入口依赖官方 `sessionLogDownload` controller 接口,且复刻官方 0.1.6 的「⋯ 更多操作」菜单形态;**它是冻结的复刻件**:DSH 升级后跑一次 `node scripts/dsh-log-ui.drift.mjs --harness <checkout>`——它按同一组锚点双向审计,漂移即非零退出(§E)。**有意的分叉**:官方 header 菜单此后多了第二项(`feedback`),本复刻件只保留 download;这是**已裁定的状态、不是待决问题**——门把它记成 note 而非失败,正因为"跟随上游新增能力"本身是一个决定,而该决定已于 2026-09-22 作出:**不跟随**。只有确实想要那个 feedback 入口时才需要重开。
 - `toPlainText` 宽松斜体匹配可能误删非格式位置的成对 `*`(如 `a * b * c`);对 agent 生成消息可接受,边界收紧为可选优化。
 - 聚合 `inject` 并集会等待所列全部服务;某 profile 缺一服务会拖慢整包 apply(web profile 当前齐备)。
 - harness 提供的依赖区间是前置版本并集;改完区间必须重跑 `pnpm install`,并在装好的 profile 上跑 `node scripts/dependency-skew.measure.mjs --profile <DSH_HOME>/profiles/web`(期望 `SKEW_COUNT=0`;`DE-INSTANCE` 表示同版本不同实例,§F 判定为可接受)。

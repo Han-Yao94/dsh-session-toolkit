@@ -52,7 +52,8 @@ const ICON_MENU_ANCHOR_PLUGIN = 'primitives.' + ICON_MENU_ANCHOR_TS
  * **加兄弟属性不改变被探的耦合**（官方仍是把 controller.store 交出、插件仍接同一个 store），
  * 而带右花括号的写法会把「加属性」误报成 DRIFT ⇒ 锚点收窄到键值本身，去掉右侧花括号。
  * ⚠️ 代价（如实写明）：收窄后本锚**不再**约束 face 的其余形状；`feedbackAvailable` 与 `openFeedback`
- * 是官方新增的能力，本插件**尚未跟随**——那是**语义漂移**，本门当前**探测不到**，另行上报（不在此处断言）。
+ * 是官方新增的能力，本插件**不跟随**——**该取舍已于 2026-09-22 由人类所有者裁定为「不跟随」**，
+ * 属**已裁定的有意分叉**（不是缺陷、不是待决项）。本门探测不到它，只以 note 提示（见文件末的覆盖率提醒）。
  */
 const ANCHOR_INJECT_FACE_STORE = 'sessionLogDownload: controller.store'
 
@@ -200,6 +201,9 @@ const missing = [...result.official.missing.map((m) => '[官方] ' + m), ...resu
  * 即"官方左键菜单有 download + feedback 两项，插件只复刻了 download 一项"。
  * 锚点全在，门照样绿 ⇒ 这类**语义漂移**必须由人看，不能读成"复刻件还是对的"。
  * 判据来源：契约表 §E 自己就写着「官方在同一 cell 新增菜单项时还会被遮蔽吞掉」。
+ *
+ * ⚠️ **该漂移已裁定（2026-09-22，人类所有者）：不跟随。** 本 note 现在是**结论**，不是待办：
+ * 它是**已裁定的有意分叉**，**不是缺陷、也不是待决项** ⇒ 读到它不要再去问"要不要跟随"。
  */
 const OFFICIAL_ENHANCEMENT_MARKERS = ['feedbackAvailable', 'openFeedback', 'menu.feedback']
 try {
@@ -213,8 +217,9 @@ try {
     console.log('')
     console.log(`note  官方侧另有本插件**未跟随**的能力：${notFollowed.join(' · ')}`)
     console.log('      官方 Session header 菜单现为「download + feedback」两项；本插件复刻件只做了 download。')
-    console.log('      ⚠️ 这是**语义漂移**：锚点齐全也照样存在，本门的 13 条锚点探不到它（不把它算成 FAIL，')
-    console.log('         因为"跟随官方新增能力"属**新决定**，不是本门的验收面）。⇒ 需要人决定是否跟随。')
+    console.log('      ✅ **这是已裁定的有意分叉**（2026-09-22，人类所有者裁决：**不跟随**），不是缺陷、也不是待决项。')
+    console.log('         保留本条只是让你知道"官方多了这一项而我们没有"；**不要**再去问是否跟随。')
+    console.log('         （本门 13 条锚点探不到它、也不把它算成 FAIL：跟随官方新增能力属新决定，不在本门验收面内。）')
   }
 } catch {
   // note 是增值信息，读不到就跳过——不得让它影响本门的退出码
