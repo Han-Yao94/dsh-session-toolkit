@@ -916,17 +916,57 @@ window.__ModuleLoader__.load({
       e.preventDefault();
     }
 
-    // 手柄注入：只给标题行挂 onMouseDown 与 grab 光标，卡片本身的 props 契约不变。
-    // ⚠️ AC51 的负向对照点就是这里——把判定从 .si-title-row 改成 .si-card 即「整卡拖动」形态。
+    // 手柄注入（裁定 #16）：在**整棵子树**里找 .si-title-row 并注入，而不是只看顶层孩子。
+    // 此前只看顶层孩子 ⇒ 顶层是 .si-head、标题行嵌在它里面 ⇒ 一次都没匹配到 ⇒ 拖动从未生效。
+    // 递归的理由：调用点的孩子嵌套深度是「渲染实现细节」，子树与绝对深度的耦合比递归更脆；
+    // 且 SiFrame 的孩子是 React 元素（不是 DOM 树），遍历代价可忽略（浮层每次打开渲染一次）。
+    // 前提：.si-title-row 目前只有 CSS 类、无内联 style，故这里 set style 不会冲掉既有内联样式；
+    // 若将来给它加了内联 style，必须改为与 child.props.style 合并（{ ...child.props.style, ...handleStyle }）。
     var handleStyle = { cursor: dragging ? 'grabbing' : 'grab' };
-    var withHandle = function (child) {
-      if (!React.isValidElement(child) || child.props.className !== 'si-title-row') return child;
-      return React.cloneElement(child, { onMouseDown: onTitleMouseDown, style: handleStyle });
+    var titleRows = 0;
+    var withHandle = function (node) {
+      if (!React.isValidElement(node)) return node;
+      if (node.props.className === 'si-title-row') {
+        titleRows++;
+        return React.cloneElement(node, { onMouseDown: onTitleMouseDown, style: handleStyle });
+      }
+      var kids = node.props.children;
+      if (kids === undefined || kids === null) return node;
+      if (Array.isArray(kids)) {
+        var mapped = [];
+        var changed = false;
+        for (var i = 0; i < kids.length; i++) {
+          var next = withHandle(kids[i]);
+          if (next !== kids[i]) changed = true;
+          mapped.push(next);
+        }
+        return changed ? React.cloneElement(node, { children: mapped }) : node;
+      }
+      var nextKid = withHandle(kids);
+      return nextKid === kids ? node : React.cloneElement(node, { children: nextKid });
     };
-    var kids = props.children;
-    var framed = Array.isArray(kids)
-      ? kids.map(withHandle)
-      : withHandle(kids);
+    var framed = withHandle(React.createElement(React.Fragment, null, props.children));
+    // 作用点自检（A 裁定 #16② 收窄后的条件）：**树里有标题行、但注入一个都没命中**才出声。
+    // 此前写的是 titleRows === 0 ⇒ 会在 loading / unavailable 这两个完全正常的态上响假警报，
+    // 而控制台是唯一的诊断面——"可被合理驳回的红会训练人忽略红"。
+    // ⚠️ 这个计数**必须独立于 withHandle**（那条路数的是"注入命中数"，用它自己数"树里有几个"
+    //    等于用输出证明输出）。故下面另走一遍纯遍历，只数节点、不注入。
+    var treeTitleRows = 0;
+    var countTitleRows = function (node) {
+      if (!React.isValidElement(node)) return;
+      if (node.props.className === 'si-title-row') { treeTitleRows++; return; }
+      var kids = node.props.children;
+      if (kids === undefined || kids === null) return;
+      if (Array.isArray(kids)) {
+        for (var i = 0; i < kids.length; i++) countTitleRows(kids[i]);
+        return;
+      }
+      countTitleRows(kids);
+    };
+    countTitleRows(React.createElement(React.Fragment, null, props.children));
+    if (treeTitleRows > 0 && titleRows === 0 && typeof console !== 'undefined' && console.warn) {
+      console.warn('[dsh-session-identity] SiFrame: the overlay tree contains a title row, but the drag handle was not attached to it (dragging will not work).');
+    }
 
     return React.createElement('div', {
       className: 'si-mask',
