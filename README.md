@@ -4,7 +4,7 @@
 
 A consolidated plugin toolkit for the **DeepSeek Harness**. Six previously separate local plugins — **session identity**, **global prompt**, **session auto-resume**, **web restart service**, **Session-log button relocation**, and **peer-session messaging** — merged into a single installable package that ships in the official bundle form (`dsh.bundle.patch`) and installs with `dsh plugin add`; it also includes a **Prompt Dedup** feature.
 
-Current version: **0.1.10**, verified against **DeepSeek Harness `dsh-v0.1.7-alpha.1`** — which is also its **minimum supported version**: 0.1.6 and earlier fail loudly by design rather than degrading silently (see [Compatibility](#compatibility)).
+Current version: **0.1.11**, verified against **DeepSeek Harness `dsh-v0.1.7-alpha.1`** — which is also its **minimum supported version**: 0.1.6 and earlier fail loudly by design rather than degrading silently (see [Compatibility](#compatibility)).
 
 ---
 

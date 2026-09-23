@@ -4,7 +4,7 @@
 
 DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Web 重启服务、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
 
-当前版本:**0.1.10**,已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证——它同时是**最低支持版本**:0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
+当前版本:**0.1.11**,已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证——它同时是**最低支持版本**:0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
 
 ---
 
