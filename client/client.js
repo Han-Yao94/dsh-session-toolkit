@@ -2465,6 +2465,10 @@ collect('log-reposition', apply);
           } catch (error) { fail(error); }
         };
         return react_jsx_runtime.jsx(primitives.MenuItemButton, {
+          // 官方三行（Fork/Rename/Pin）都不传 size —— MenuItemButton 把 icon 放进自己的
+          // <span class="itemIcon">（ui-primitives/src/Menu.tsx:87），尺寸由宿主样式管。
+          // 注：ArchiveSession 那行传了 size={14}，是官方四项里唯一的例外（已报 A）。
+          icon: react_jsx_runtime.jsx(primitives.IconCopyOutlineRegular, {}),
           separatorBefore: true,
           onSelect: onSelect,
           children: t('copy')
