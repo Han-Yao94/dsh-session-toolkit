@@ -803,6 +803,24 @@ window.__ModuleLoader__.load({
     return { dx: dx, dy: dy };
   }
 
+  // siClamp(dx, dy, rect) 的两个入参**各有契约**（裁定 #17 修正）：
+  //   · rect 必须是**布局矩形**——getBoundingClientRect() 返回的是「布局位置 + 当前 translate」，
+  //     必须先减去当前已应用的平移才是布局矩形；
+  //   · dx/dy 必须是**相对布局位置的绝对平移量**，不是「本次按下以来的位移」。
+  // 违反任一条的后果：钳制出的区间整体平移了「当前平移量」，于是每次新会话都从布局位置重新开始
+  // ——用户看到的就是「第二次一按下就跳回原位」。第一次拖动恰好看不出问题（起始 pos=0、位移==绝对平移）。
+  // ⚠️ 更正一条曾写在这里的**错误推理**（它正是这个 bug 的来源）：
+  //   旧注释说「k = 本次 rect − 本次已应用的 d 等于布局位置，故对本次 rect 做钳制等于对布局位置做钳制」。
+  //   这句**不等价**：用含 translate 的 rect 去钳，允许区间会整体平移 d_cur（实测 200 → 0）。
+  //   正确的做法是本函数做的显式减法，不是"两边同时平移所以等价"。
+  function siLayoutRect(card, dx, dy) {
+    var r = card.getBoundingClientRect();
+    return {
+      left: r.left - dx, top: r.top - dy, right: r.right - dx, bottom: r.bottom - dy,
+      width: r.width, height: r.height,
+    };
+  }
+
   // 标题行内可能有按钮。若用户按在按钮上并发生了拖动，松手时浏览器会补一次 click，
   // 那不是「点击」而是拖动残留。以拖动距离（>4px）判定并吞掉那一次 click——
   // 未移动就松手 ⇒ 不拦截，按钮行为完全不变（AC50）。
@@ -847,10 +865,11 @@ window.__ModuleLoader__.load({
       };
     }, []);
 
-    // 静止时把量到的布局矩形写进 posRef，供 resize 钳制使用；拖动会话期间不覆盖（会话已冻结 rect）。
+    // 静止时把**布局矩形**写进 posRef，供 resize 钳制使用；拖动会话期间不覆盖（会话已冻结自己的基准）。
+    // 注意：getBoundingClientRect 含当前 translate，必须减去当前平移才是布局矩形（裁定 #17）。
     if (!dragging) {
       var cardEl = cardRef.current;
-      posRef.current.rectForClamp = cardEl ? cardEl.getBoundingClientRect() : posRef.current.rectForClamp;
+      if (cardEl) posRef.current.rectForClamp = siLayoutRect(cardEl, pos.dx, pos.dy);
       posRef.current.dx = pos.dx;
       posRef.current.dy = pos.dy;
     }
@@ -881,15 +900,20 @@ window.__ModuleLoader__.load({
       }
       var card = cardRef.current;
       if (!card) return;
-      var rect = card.getBoundingClientRect();
+      // 会话内冻结基准（裁定 #17）：本次拖动是「从当前位置继续」，
+      // 故后续位移一律以 base + 本次鼠标位移 的**绝对平移量**喂 siClamp，
+      // 并用**布局矩形**（量到的 rect 减去 base）作为钳制基准。
+      var baseDx = posRef.current.dx;
+      var baseDy = posRef.current.dy;
+      var rect = siLayoutRect(card, baseDx, baseDy);
       var startX = e.clientX;
       var startY = e.clientY;
       var moved = false;
       var ses = {
         onMove: function (ev) {
-          var rawX = ev.clientX - startX;
-          var rawY = ev.clientY - startY;
-          if (!moved && Math.abs(rawX) + Math.abs(rawY) > 4) moved = true;
+          var rawX = baseDx + (ev.clientX - startX);
+          var rawY = baseDy + (ev.clientY - startY);
+          if (!moved && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) moved = true;
           var c = siClamp(rawX, rawY, rect);
           if (c.dx === posRef.current.dx && c.dy === posRef.current.dy) return;
           posRef.current.dx = c.dx;
