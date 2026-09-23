@@ -2432,6 +2432,44 @@ collect('log-reposition', apply);
         id: 'copy-session-id-input',
         order: 30
       }, function (props) { return react_jsx_runtime.jsx(CopySessionIdAction, { sessionId: props.sessionId, ctx: ctx, t: t }); }));
+
+      // 侧栏会话行「⋯」菜单里的一行「复制会话 ID」（裁定 #18）。
+      // 槽位 `sidebar.workspaces.session.menu.item` 是**平台声明的扩展点**（不是我们发明的名字）：
+      // harness `packages/client/ui-workspace/lib/types/client/contract/slots.d.ts` :127 声明，
+      // :113-124 给出官方示例；shipped 四项（置顶/重命名/分叉/归档）走同一槽位，本行以 order 500 排在它们之后。
+      // 槽位契约（同文件 :128-137）：kind 'list'、scope 'root'、owner SessionRowOwnerProps、hookContext MenuOpenState。
+      // 宿主把 hookContext 按 `standardHookPropName` 转成渲染 prop（ui-slots 的
+      // `use<Name>`：menuOpenState → useMenuOpenState），UI 组件用 `const [, setMenuOpen] = useMenuOpenState()` 关菜单。
+      // ⚠️ id 用包名命名空间——官方文档示例里的 `copy-session-id` 是**裸名**，我们自己的行不能占用它
+      //   （复用 shipped id 会在另一 priority 上遮蔽那一行）。
+      ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register({
+        name: 'sidebar.workspaces.session.menu.item',
+        id: 'dsh-session-toolkit.copy-session-id',
+        order: 500
+      }, function (props) {
+        // hooks 面按名字转成 prop 后是 `useMenuOpenState`（函数）；这里兼容两种形态，
+        // 且缺失时**出声**而不是静默——本插件已两次栽在「渲染期抛错被 slot 错误边界吞掉」上。
+        var hook = props && props.useMenuOpenState;
+        var setMenuOpen = null;
+        if (typeof hook === 'function') setMenuOpen = hook()[1];
+        else if (hook && typeof hook.menuOpenState === 'function') setMenuOpen = hook.menuOpenState()[1];
+        else if (hook && typeof hook.menuOpenState === 'object') setMenuOpen = hook.menuOpenState.setMenuOpen;
+        var onSelect = function () {
+          // 先关菜单再复制：关菜单是同步的，复制是异步的，顺序不能反（否则菜单会停在打开态等 promise）
+          if (typeof setMenuOpen === 'function') setMenuOpen(false);
+          else if (typeof console !== 'undefined' && console.error) console.error('[peer-message] sidebar copy: useMenuOpenState hook unavailable — menu cannot be dismissed');
+          var fail = function (error) { if (typeof console !== 'undefined' && console.error) console.error('[peer-message] sidebar copy session id failed:', error); };
+          try {
+            var copied = navigator.clipboard.writeText(String(props.sessionId));
+            if (copied && typeof copied.then === 'function') copied.then(null, fail);
+          } catch (error) { fail(error); }
+        };
+        return react_jsx_runtime.jsx(primitives.MenuItemButton, {
+          separatorBefore: true,
+          onSelect: onSelect,
+          children: t('copy')
+        });
+      }));
     }
 
 collect('peer-message', apply);
