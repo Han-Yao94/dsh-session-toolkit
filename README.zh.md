@@ -250,9 +250,9 @@ pnpm verify   # 另加打包契约 —— 入口可达、import 声明完整、�
 
 ### 分享与安装
 
-已发布至 **npm**(`dsh-session-toolkit`,**最新已发布版本 v0.1.8**,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+已发布至 **npm**(`dsh-session-toolkit`,**最新已发布版本 v0.1.11**,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
 
-> **本仓库领先于已发布包。** npm 发布当前**处于暂停**,因此上文介绍的会话管理工具(`create_session` / `rename_session`)**尚未进入任何已发布版本**——今天从 npm 安装得到的是 0.1.8,其中不含这两个工具。要现在使用,请从本 checkout 或 GitHub 安装(`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`)。
+> **npm 上就是当前版本。** `0.1.11` 已发布,因此 `dsh plugin --profile web add dsh-session-toolkit` 即可得到上文介绍的会话管理工具(`create_session` / `rename_session`)及其余全部功能。`0.1.9` 与 `0.1.10` 打过 tag 但从未进入 npm,故本次是 `0.1.8` 之后第一个真正发布的版本。从本 checkout 或 GitHub 安装(`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`)等价。
 
 - **npm**:消费者 `dsh plugin --profile web add dsh-session-toolkit` 安装;新版本通过 `npm publish`(或 `pnpm publish`)发布。
 - **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
