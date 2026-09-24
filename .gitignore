@@ -27,3 +27,10 @@ DEVELOPMENT.md
 .mnemon/
 
 doc/
+
+# 智能体协作面（不入库；2026-09-24 由人类所有者裁定：「docs 目录下的都不能提交」）
+docs/agents/*
+# 例外：集成契约是 CI 门的输入，必须留在版本库 —— 否则干净检出里锚门直接失败。
+#   证据：.github/workflows/npm-publish.yml:91（§0 内容锚门：重算本文件 §0 的 12 条锚）
+#         scripts/anchor.contract.selftest.mjs:47（ANCHOR_DEFAULT_REL 默认指向本文件）
+!docs/agents/integration-contracts.md
