@@ -35,7 +35,6 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import {
   appendFileSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync,
   readFileSync, readdirSync, rmSync, writeFileSync,
@@ -43,6 +42,9 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  assertOutsideWorkspace as guardPathOk, manifest, manifestDiff,
+} from './lib/manifest-guard.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const TMP_BASE = os.tmpdir()
@@ -51,49 +53,21 @@ const EXIT = { PASS: 0, FAIL: 1 }
 // ------------------------------------------------------------------ 护栏 1
 // 裁定 #11：判据是「与工作区根之间不存在前缀包含关系（双向）」，不只是"不相等"。
 // 否则 D:\ws\sub 这种「不相等但仍在工作区内」的路径会漏过去。
-function within(a, b) {
-  return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep)
-}
-
+// 判据本体在 `scripts/lib/manifest-guard.mjs`（纯函数、可取用）；此处的包装负责**拒绝的形式**
+// ——门在违规时 `process.exit(FAIL)`（`--selftest` 与 CI 都靠退出码），并原样保留可读的两行输出。
 function assertOutsideWorkspace(p, label) {
-  const abs = path.resolve(p)
-  const inTmp = within(abs, TMP_BASE)
-  const nested = within(abs, ROOT) || within(ROOT, abs)
-  if (!inTmp || nested) {
-    console.error(`护栏 1 触发：${label} → ${abs}`)
-    console.error('  必须在 os.tmpdir() 之下，且与工作区根之间不得存在前缀包含关系（双向）。拒绝继续。')
+  try {
+    guardPathOk(p, label, { root: ROOT, tmpBase: TMP_BASE })
+  } catch (e) {
+    console.error(e.message)
     process.exit(EXIT.FAIL)
   }
 }
 
 // ------------------------------------------------------------------ 护栏 2
-const IGNORE_DIRS = new Set(['.git', 'node_modules'])
+// 判据与实测数字见 `scripts/lib/manifest-guard.mjs`（纳入口径 = 「不得改动任何未忽略内容」）；
+// 本文件 `guard2/*` 自证项会打印清单条数，用来核那个 1524 = 1474 + 1 + 49 的分解。
 
-function manifest(dir) {
-  const out = new Map()
-  const walk = (d) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name)
-      if (e.isDirectory()) {
-        if (!IGNORE_DIRS.has(e.name)) walk(p)
-      } else if (e.isFile()) {
-        out.set(
-          path.relative(dir, p).split(path.sep).join('/'),
-          createHash('sha256').update(readFileSync(p)).digest('hex'),
-        )
-      }
-    }
-  }
-  walk(dir)
-  return out
-}
-
-function manifestDiff(before, after) {
-  const diffs = []
-  for (const [k, v] of after) if (before.get(k) !== v) diffs.push(before.has(k) ? `内容变化: ${k}` : `新增: ${k}`)
-  for (const k of before.keys()) if (!after.has(k)) diffs.push(`删除: ${k}`)
-  return diffs
-}
 
 // ------------------------------------------------------------------ 运行器
 // 先判路径、再落盘：否则"先在禁止位置建目录、再拒绝"仍是工作区写入。
@@ -350,6 +324,113 @@ function judge(c, r, { expectExit, marker, forbid }) {
   if (!pass) {
     const tail = r.output.trim().split(/\r?\n/).slice(-8).join('\n')
     console.log(`      ---- verify.mjs 输出尾部 ----\n${tail}\n      ----------------------------`)
+  }
+}
+
+// ------------------------------------------------------------------ 护栏自证（裁定 #53）
+// 判据：「不会失败的检查等于没有检查」。两条护栏此前都**没有用例证明它们报得出红**
+// （拒绝分支 `:62-66` 与对拍分支 `:91-96` 从未被触发过一次）。
+function check(id, ok, notes) {
+  // `notes` 存成**数组**：本文件既有的汇总（`:507` 区）用 `f.notes.join('；')` 拼多行，
+  // 曾有版本在此存字符串 ⇒ 只在**真的有失败**时才崩（`TypeError: f.notes.join is not a function`），
+  // 即"全绿时看不出来"。存数组让两种输入都安全。
+  const arr = Array.isArray(notes) ? notes : notes ? [String(notes)] : []
+  results.push({ id, kind: 'guard', status: null, pass: ok, notes: ok ? [] : arr })
+  console.log(`${ok ? 'PASS' : 'FAIL'}  [guard] ${id}${ok ? '' : `  ← ${arr.join('；')}`}`)
+}
+
+// 护栏 1 自证：判据本体（`scripts/lib/manifest-guard.mjs`）必须拒绝「与工作区根双向有前缀包含」的路径。
+// 负向对照（本用例自身可失败）：把该模块 `assertOutsideWorkspace` 的 `nested` 改成 `const nested = false`
+//   ⇒ 第一条断言红 ⇒ 本门 EXIT=1（实测读数见 §15 / 交付报告）。
+{  // 门的**全部判据分支**逐个喂（纯内存，不起子进程）：
+  // ⚠️ 曾经的写法（已废弃，两次踩坑）：起子进程 `import` 本门文件去调它自己那个包装 ——
+  //    本门**顶层就是主流程**（先跑用例、最后才对拍），于是 import 它会连它自己的自证一起跑，
+  //    而那条自证又起子进程 ⇒ **无限递归 fork**（实测触发两次，均以 pkill 收场）。
+  //    改判：门的包装不过两行（`guardPathOk` + `process.exit`），其运行证据来自本门启动时的
+  //    `assertOutsideWorkspace(WORK, …)`（`:113` 区，合法路径必须放行，否则本门根本跑不到这里）；
+  //    **判据本身**由下表覆盖，而"门确实用它、且在真 ROOT 上执行"由下面的变异测试覆盖。
+  const fakeRoot = path.join(TMP_BASE, 'dsh-st-fake-root')
+  const fakeTmp = path.join(TMP_BASE, 'dsh-st-fake-tmp')
+  const j = (...p) => path.join(...p)
+  const guard1Cases = [
+    { name: '工作区内·真', p: j(fakeRoot, 'sub'), root: fakeRoot, tmp: fakeTmp, reject: true, why: '在工作区根之下' },
+    { name: '等于工作区根', p: fakeRoot, root: fakeRoot, tmp: fakeTmp, reject: true, why: '双向包含（相等）' },
+    { name: '反向包含·根本身在候选之下', p: fakeTmp, root: j(fakeTmp, 'sub'), tmp: fakeTmp, reject: true, why: 'reverse-nested（裁定 #11 补的那格）' },
+    { name: '前缀像但其实无关', p: j(fakeTmp, 'other', 'x'), root: j(fakeTmp, 'oth'), tmp: fakeTmp, reject: false, why: '按分量比较，不是字符串前缀 ⇒ 必须放行' },
+    { name: '临时区·合法', p: j(fakeTmp, 'work', 'x'), root: fakeRoot, tmp: fakeTmp, reject: false, why: '在 tmpBase 之下且与根无包含关系' },
+    { name: '两者皆非', p: j(path.sep, 'definitely-outside'), root: fakeRoot, tmp: j(fakeTmp, 'nowhere'), reject: true, why: '既不在 tmpBase 下、也不在根下 ⇒ 拒' },
+  ]
+  for (const c of guard1Cases) {
+    let rejected = false
+    let m = ''
+    try {
+      guardPathOk(c.p, '自证', { root: c.root, tmpBase: c.tmp })
+    } catch (e) {
+      rejected = true
+      m = e.message
+    }
+    check(
+      `guard1/判据-自证·${c.name}`,
+      rejected === c.reject,
+      `期望${c.reject ? '拒绝' : '放行'}（${c.why}），实得${rejected ? '拒绝' : '放行'}`
+      + `（p=${c.p} root=${c.root} tmpBase=${c.tmp}）`
+      + (rejected && !c.reject ? `；拒绝消息：${m.split('\n')[0]}` : ''),
+    )
+  }
+}
+
+// ------------------------------------------------------------------ 护栏 2 自证
+// `manifestDiff` 三个分支（新增 / 内容变化 / 删除）各喂一次；**只在 Map 内存里造差异**，
+// 不触碰任何文件（`manifest(ROOT)` 本身是纯读）。
+// 「门确实在真 ROOT 上对拍、且真能报红」由变异测试覆盖（`verify.selftest.mjs` 的副本 + 在其根写文件）。
+// 负向对照（本用例自身可失败）：把 `manifestDiff` 改成 `return []` ⇒ 三条同时红（实测读数见 §15）。
+{
+  const m0 = manifest(ROOT)
+  const probe = [...m0.keys()]
+  const ignoredInList = probe.filter((k) => k === '.DS_Store' || k.startsWith('.pnpm-store/'))
+
+  check(
+    'guard2/清单-自证·非空',
+    m0.size >= 10,
+    `清单仅 ${m0.size} 条 ⇒ 清单为空或近乎为空时，对拍恒绿（护栏形同虚设）`,
+  )
+
+  check(
+    'guard2/清单-自证·不含忽略项',
+    ignoredInList.length === 0,
+    `清单仍含忽略项 ${ignoredInList.length} 条（${ignoredInList.slice(0, 3).join(', ')}）`
+    + ' ⇒ 纳入口径未生效：`pnpm install` 或 Finder 一动就让本格报红而**归因错**'
+    + '（1524 条里 1474 条 store + 1 条 .DS_Store，真被测面只有 49）',
+  )
+
+  const added = new Map(m0)
+  added.set('__selfcheck__/新增', '0'.repeat(64))
+  check(
+    'guard2/manifestDiff-自证·新增',
+    manifestDiff(m0, added).length === 1,
+    '造 1 条新增，应报 1 条差异；报 0 条 ⇒ 对拍报不出差异',
+  )
+
+  if (probe.length > 0) {
+    const k0 = probe[0]
+    const changed = new Map(m0)
+    changed.set(k0, '0'.repeat(64))
+    check(
+      'guard2/manifestDiff-自证·内容变化',
+      manifestDiff(m0, changed).length === 1,
+      `造 1 条内容变化（键 ${k0}），应报 1 条差异；报 0 条 ⇒ 对拍报不出差异`,
+    )
+
+    const deleted = new Map(m0)
+    deleted.delete(k0)
+    check(
+      'guard2/manifestDiff-自证·删除',
+      manifestDiff(m0, deleted).length === 1,
+      `造 1 条删除（键 ${k0}），应报 1 条差异；报 0 条 ⇒ 对拍报不出差异`,
+    )
+  } else {
+    check('guard2/manifestDiff-自证·内容变化', false, '清单为空 ⇒ 无法造差异，护栏 2 本就无意义')
+    check('guard2/manifestDiff-自证·删除', false, '清单为空 ⇒ 无法造差异，护栏 2 本就无意义')
   }
 }
 

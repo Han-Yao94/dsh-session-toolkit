@@ -165,16 +165,21 @@ jobs:
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
-    # 注：本仓库的既成约定是「**契约门**挂 needs，**探测器**只挂 selftest job 内的步骤」。
+    # 注：分界判据是**红是否可被合理驳回**，依此分两类 ——
+    #     · **契约门**：红只有一个动作（修它），故挂 `needs`，一次安全回归都不该被发布出去；
+    #     · **探测器**：红在合法重构下可被讨论（改个常数、换个别名），故**既不进 `needs`、也不接进
+    #       本 workflow 的任何步骤**，只由「必跑」的流程项约束（人监督清单项，同 §D.3 改行号重核）。
     #     `scripts/clamp-call.assert.mjs` 经裁定归**探测器**（文本级调用计数、别名可绕、红在合法重构下
-    #     属设计如此），故它不接进本 workflow；它挂 package.json 的 assert:clamp / assert:clamp:selftest，
-    #     由「改 client/client.js 钳制段时必跑」的流程项约束（人监督清单项，同 §D.3 改行号重核）。
+    #     属设计如此），故它不在本 workflow 里；它挂 package.json 的 assert:clamp / assert:clamp:selftest，
+    #     由「改 client/client.js 钳制段时必跑」约束。**本 job 内也没有它的步骤**。
+    #     （对照：`:46 dependency-skew.measure.mjs --selftest` 与 `:47 dsh-log-ui.drift.mjs --selftest`
+    #      确实在 `selftest` job 里跑 —— 它们是**不需要外部 checkout**的自证步骤；本条之所以例外在
+    #      「不进任何步骤」，理由是上面的"可被合理驳回"，与它们能否在 CI 跑无关。）
     needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers]
-    # ⚠️ `request-guard` **加入 needs**（D 的判断，理由如下，与"探测器不挂 needs"的既有约定不冲突）：
-    #   本仓库的判据是「**契约门**挂 needs、**探测器**只挂 selftest job 内的步骤」，而分界的实质是
-    #   **红是否可被合理驳回**：
+    # ⚠️ `request-guard` **加入 needs**（D 的判断；按上面的分界判据，它是契约门而非探测器，故不冲突）：
+    #   判据同上：**红是否可被合理驳回**。
     #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），
-    #       把可讨论的红接到发布路径上会训练人忽略红 ⇒ 不进 needs（裁定 #53）。
+    #       把可驳回的红接上发布路径会训练人忽略红 ⇒ 不进任何步骤（裁定 #53）。
     #     · 本门属**契约门** —— 它的红（`lib/request-guard.js` 的判定与契约不符、或门自身不再能红）
     #       **只有一个动作**：修它。没有"这次可以放过"的合法理由。
     #   ⇒ **一次安全回归不该被发布出去**：把它接在发布路径上，代价是"发布被挡住一次"，

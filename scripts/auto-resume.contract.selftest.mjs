@@ -61,50 +61,26 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+// 两条护栏的判据本体（与 verify.selftest.mjs 共用同一实现，避免两门各自腐化）
+import {
+  assertOutsideWorkspace as guardPathOk, manifest, manifestDiff,
+} from './lib/manifest-guard.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const TMP_BASE = os.tmpdir()
 const EXIT = { PASS: 0, FAIL: 1, INCOMPLETE: 3, USAGE: 64 }
 
-// ------------------------------------------------------------------ 护栏 1
-function within(a, b) {
-  return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep)
-}
-
+// ------------------------------------------------------------------ 护栏 1 / 护栏 2
+// 判据本体已抽到 `scripts/lib/manifest-guard.mjs`（与 verify.selftest.mjs 共用同一份实现）。
+// 本门只保留"拒绝形式"的包装：护栏 1 的判据仍然照旧，只是 decision 由库里给。
 function assertOutsideWorkspace(p, label) {
-  const abs = path.resolve(p)
-  if (!within(abs, TMP_BASE) || within(abs, ROOT) || within(ROOT, abs)) {
-    console.error(`护栏 1 触发：${label} → ${abs}`)
+  try {
+    guardPathOk(p, label, { root: ROOT, tmpBase: TMP_BASE })
+  } catch (e) {
+    console.error(e.message)
     console.error('  必须在 os.tmpdir() 之下，且与工作区根之间不得存在前缀包含关系（双向）。拒绝继续。')
     process.exit(EXIT.FAIL)
   }
-}
-
-// ------------------------------------------------------------------ 护栏 2
-const IGNORE_DIRS = new Set(['.git', 'node_modules'])
-
-function manifest(dir) {
-  const out = new Map()
-  const walk = (d) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name)
-      if (e.isDirectory()) {
-        if (!IGNORE_DIRS.has(e.name)) walk(p)
-      } else if (e.isFile()) {
-        out.set(path.relative(dir, p).split(path.sep).join('/'),
-          createHash('sha256').update(readFileSync(p)).digest('hex'))
-      }
-    }
-  }
-  walk(dir)
-  return out
-}
-
-function manifestDiff(before, after) {
-  const diffs = []
-  for (const [k, v] of after) if (before.get(k) !== v) diffs.push(before.has(k) ? `内容变化: ${k}` : `新增: ${k}`)
-  for (const k of before.keys()) if (!after.has(k)) diffs.push(`删除: ${k}`)
-  return diffs
 }
 
 // ------------------------------------------------------------------ 工作区
@@ -505,6 +481,79 @@ if (!readFileSync(requestedPath, 'utf8').includes(BAD_FINGERPRINT)) {
     noController.controller.length === 0 && noController.resume.length > 0,
     `变异体 controller 调用 = [${noController.controller.join(', ')}]，agents.resume = [${noController.resume.join(', ')}]`
     + '（期望 controller 为空且 agents.resume 非空）')
+}
+
+// ------------------------------------------------------------------ 护栏自证（裁定 #53）
+// 判据：「不会失败的检查等于没有检查」。两条护栏此前都**没有用例证明它们报得出红**。
+// 负向对照（本条自身可失败）：把 `scripts/lib/manifest-guard.mjs` 的 `manifestDiff` 改成
+//   `return []` ⇒ 下面三条 `manifestDiff-自证·*` 同时红；把 `assertOutsideWorkspace` 的
+//   `nested` 改成 `false` ⇒ `判据-自证·工作区内` 红。（实测读数见 §15 / 交付报告）
+{
+  const fakeRoot = path.join(TMP_BASE, 'dsh-arv-fake-root')
+  const fakeTmp = path.join(TMP_BASE, 'dsh-arv-fake-tmp')
+  const j = (...p) => path.join(...p)
+  const guard1Cases = [
+    { name: '工作区内·真', p: j(fakeRoot, 'sub'), root: fakeRoot, tmp: fakeTmp, reject: true, why: '在工作区根之下' },
+    { name: '等于工作区根', p: fakeRoot, root: fakeRoot, tmp: fakeTmp, reject: true, why: '双向包含（相等）' },
+    { name: '反向包含·根本身在候选之下', p: fakeTmp, root: j(fakeTmp, 'sub'), tmp: fakeTmp, reject: true, why: 'reverse-nested（裁定 #11 补的那格）' },
+    { name: '前缀像但其实无关', p: j(fakeTmp, 'other', 'x'), root: j(fakeTmp, 'oth'), tmp: fakeTmp, reject: false, why: '按分量比较，不是字符串前缀 ⇒ 必须放行' },
+    { name: '临时区·合法', p: j(fakeTmp, 'work', 'x'), root: fakeRoot, tmp: fakeTmp, reject: false, why: '在 tmpBase 之下且与根无包含关系' },
+    { name: '两者皆非', p: j(path.sep, 'definitely-outside-arv'), root: fakeRoot, tmp: j(fakeTmp, 'nowhere'), reject: true, why: '既不在 tmpBase 下、也不在根下 ⇒ 拒' },
+  ]
+  for (const c of guard1Cases) {
+    let rejected = false
+    let m = ''
+    try {
+      guardPathOk(c.p, '自证', { root: c.root, tmpBase: c.tmp })
+    } catch (e) {
+      rejected = true
+      m = e.message
+    }
+    check(
+      `guard/custom1-判据-自证·${c.name}`,
+      rejected === c.reject,
+      `期望${c.reject ? '拒绝' : '放行'}（${c.why}），实得${rejected ? '拒绝' : '放行'}`
+      + `（p=${c.p} root=${c.root} tmpBase=${c.tmp}）`
+      + (rejected && !c.reject ? `；拒绝消息：${m.split('\n')[0]}` : ''),
+    )
+  }
+
+  const m0 = manifest(ROOT)
+  const probe = [...m0.keys()]
+  const ignoredInList = probe.filter((k) => k === '.DS_Store' || k.startsWith('.pnpm-store/'))
+  check(
+    'guard/custom2-清单-自证·非空',
+    m0.size >= 10,
+    `清单仅 ${m0.size} 条 ⇒ 清单为空或近乎为空时，对拍恒绿（护栏形同虚设）`,
+  )
+  check(
+    'guard/custom2-清单-自证·不含忽略项',
+    ignoredInList.length === 0,
+    `清单仍含忽略项 ${ignoredInList.length} 条（${ignoredInList.slice(0, 3).join(', ')}）`
+    + ' ⇒ 纳入口径未生效：`pnpm install` 或 Finder 一动就让本格报红而**归因错**'
+    + '（1524 条里 1474 条 store + 1 条 .DS_Store，真被测面只有 49）',
+  )
+
+  const added = new Map(m0)
+  added.set('__selfcheck__/新增', '0'.repeat(64))
+  check('guard/custom2-manifestDiff-自证·新增', manifestDiff(m0, added).length === 1,
+    '造 1 条新增，应报 1 条差异；报 0 条 ⇒ 对拍报不出差异')
+
+  if (probe.length > 0) {
+    const k0 = probe[0]
+    const changed = new Map(m0)
+    changed.set(k0, '0'.repeat(64))
+    check('guard/custom2-manifestDiff-自证·内容变化', manifestDiff(m0, changed).length === 1,
+      `造 1 条内容变化（键 ${k0}），应报 1 条差异；报 0 条 ⇒ 对拍报不出差异`)
+
+    const deleted = new Map(m0)
+    deleted.delete(k0)
+    check('guard/custom2-manifestDiff-自证·删除', manifestDiff(m0, deleted).length === 1,
+      `造 1 条删除（键 ${k0}），应报 1 条差异；报 0 条 ⇒ 对拍报不出差异`)
+  } else {
+    check('guard/custom2-manifestDiff-自证·内容变化', false, '清单为空 ⇒ 无法造差异，护栏 2 本就无意义')
+    check('guard/custom2-manifestDiff-自证·删除', false, '清单为空 ⇒ 无法造差异，护栏 2 本就无意义')
+  }
 }
 
 // ------------------------------------------------------------------ 工作区对拍
