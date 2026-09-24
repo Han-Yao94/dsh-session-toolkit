@@ -2,7 +2,7 @@
 /**
  * §0 内容锚门（anchor.contract.selftest.mjs）
  *
- * 守的是什么：`docs/agents/integration-contracts.md` §0 登记的 12 条内容锚
+ * 守的是什么：`docs/agents/integration-contracts.md` §0 登记的 14 条内容锚
  * （被引文件 SHA256）。锚是**契约表的唯一机器判据**（表头 L13：行号不得作为判据）。
  * 被引文件一旦变动，表里对应的行号/引用就可能静默失效——本门把这个"静默"变成会红。
  *
