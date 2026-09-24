@@ -223,9 +223,9 @@ pnpm verify   # + packaging contract — entry reachability, undeclared imports,
 
 ### Share & Install
 
-Published on **npm** as `dsh-session-toolkit` (**latest published version: v0.1.11**, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
+Published on **npm** as `dsh-session-toolkit` (**latest published version: v0.1.12**, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
 
-> **npm carries the current version.** `0.1.11` is published, so `dsh plugin --profile web add dsh-session-toolkit` gives you the session-management tools (`create_session` / `rename_session`) and everything else described above. `0.1.9` and `0.1.10` were tagged but never reached npm, so this is the first published version since `0.1.8`. Installing from this checkout or from GitHub (`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`) is equivalent.
+> **npm carries the current version.** `0.1.12` is published, so `dsh plugin --profile web add dsh-session-toolkit` gives you the session-management tools (`create_session` / `rename_session`) and everything else described above. `0.1.9` and `0.1.10` were tagged but never reached npm; `0.1.11` was the first published version since `0.1.8`. Installing from this checkout or from GitHub (`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`) is equivalent.
 
 - **npm**: consumers run `dsh plugin --profile web add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
 - **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.
