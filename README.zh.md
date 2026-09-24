@@ -4,7 +4,7 @@
 
 DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Web 重启服务、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
 
-当前版本:**0.1.11**,已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证——它同时是**最低支持版本**:0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
+当前版本:**0.1.11**,已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证——它同时是**最低支持版本**——并在 **`dsh-v0.1.7-rc.1`** 上**重新验证过**(**契约面 + 全套门,非完整功能回归**):0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
 
 ---
 
@@ -52,7 +52,7 @@ host 平面另注册两个工具,**与 `send_to_session` / `list_sessions` 同�
 - **preset 降级** —— `agentPresets` 服务存在但默认 preset 解析失败时,工具**返回 `PRESET_RESOLVE_FAILED`,而不是交付一个没有 preset 的残缺会话**;服务整体缺失属合法降级,会话照建并带说明性 `notes`。
 
 ### 会话间消息(Peer Messaging)
-host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区路径寻址会话、wakeup 投递),并在 `conversation.session.header.actions`(id `copy-session-id`,order 30)与 `conversation.input.left`(id `copy-session-id-input`,order 30)各加「复制会话 ID」按钮。发出消息内容在投递前经 `toPlainText` 转为纯文本,接收方看到整洁文本而非原始 markdown。
+host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区路径寻址会话、wakeup 投递),并在 `conversation.session.header.actions`(id `copy-session-id`,order 30)与 `conversation.input.left`(id `copy-session-id-input`,order 30)各加「复制会话 ID」按钮。发出消息内容在投递前经 `toPlainText` 转为纯文本,接收方看到整洁文本而非原始 markdown。**`wakeup` 有两条不同的投递路径**:`wakeup: true`(走 `steer`)时,目标**正在执行** ⇒ 消息进**当前轮的下一个步边界**(既不新开一轮,也不打断当前步);目标**空闲** ⇒ 立刻开一轮;`wakeup: false`(走 `inject`)只投递、不唤醒任何人。**两种情形仍会排队而不是插入**:投递时目标空闲(没有步边界可插,消息在下一个轮次边界被收下),以及内核的 `wakingAfterAbort` 重分类(上一个活动正在被取消时,`steer` 被静默降级为 `next-turn`)。因此 `steer` **不是**「消息永不等待」的承诺——判断一条消息是否真的插入,要看三件事同时成立:`target` 是 `next-step`、投递时有轮在跑、且投递到消费之间**没有新的 `turn/start`**。
 
 ### 提示词去重(Prompt Dedup)
 对 **身份 / 全局 / 工作区** 三段系统提示词(段 `session-identity`、`global-prompt`、`workspace-prompt`,order 40/50/60)做**跨段行级去重**。`promptDedup.enabled` 默认开启(仅显式设为 false 时禁用)。按 `\n` 切分,三段内出现过的**完全相同原行**只保留"先出现"那一份(全局 `seen` 贯穿三段,同段内部自重复也收敛),后出现段的重复行被去掉;任何段独有内容一律保留。**空行(含只有空白的行)不参与去重**——空行是 markdown 的段落/列表分隔,把它当成重复行会让第一段之后的每一段空行都被删掉。不解析 `{{name}}` 占位符(单行完整组,按行切分不会切断)、不破坏 markdown、不设 complete,绝不动 harness 自带段(`harness:identity` / `deployment:persona` / 工具段)。机制:在插件根 ctx 订阅 `system-prompt/assemble` waterfall,`await next()` 后对返回结果的 `sections` 做去重再返回。
@@ -61,9 +61,9 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 
 ## 兼容性
 
-插件已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证,并以它作为**最低支持版本**:0.1.7 把 settings 从「插件注册命名空间 + `ctx.settingsScope.bind`」改为「条目 Config 的 `volatile` 字段 + `ctx.configForms`」,用户数据面因此整体迁移(见[设置字段](#设置字段条目-config-的-volatile-部分))。在 0.1.6 及更早内核上,客户端条目会停在 `pending (waiting for service: configForms)`,`web boot` 报「Failed to load plugins」——这是**响亮失败**而非静默降级,处置是升级 harness 或卸载本插件。`interpolate: false` 与 `ctx.sessionController.resolveAgent` 的既有兜底不变。
+插件已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证,并以它作为**最低支持版本**,另在 **`dsh-v0.1.7-rc.1`** 上**重新验证过**(**契约面 + 全套门,非完整功能回归**;声明的依赖区间——harness 包 `^0.1.7-alpha.1`、schemastery `^3.18.3`——本来就同时覆盖两者):0.1.7 把 settings 从「插件注册命名空间 + `ctx.settingsScope.bind`」改为「条目 Config 的 `volatile` 字段 + `ctx.configForms`」,用户数据面因此整体迁移(见[设置字段](#设置字段条目-config-的-volatile-部分))。在 0.1.6 及更早内核上,客户端条目会停在 `pending (waiting for service: configForms)`,`web boot` 报「Failed to load plugins」——这是**响亮失败**而非静默降级,处置是升级 harness 或卸载本插件。`interpolate: false` 与 `ctx.sessionController.resolveAgent` 的既有兜底不变。
 
-- **框架**:`@deepseek-ai/cordis` 4.0.3 与 `@deepseek-ai/schemastery` 3.18.3(即 `dsh-v0.1.7-alpha.1` vendored 的版本)。`@deepseek-ai/schemastery` 的下限是 `^3.18.3`:`volatile()` 在该版本才存在,更早的 3.18.x 会让 `Config` 构造直接抛错。插件经 cordis harness 加载,并以 `dsh.bundle.patch` 注册为 bundle。
+- **框架**:`@deepseek-ai/cordis` 4.0.3 与 `@deepseek-ai/schemastery` 3.18.3(即 `dsh-v0.1.7-alpha.1` vendored 的版本;`dsh-v0.1.7-rc.1` vendored 的是 cordis 4.0.4 / schemastery 3.18.4)。`@deepseek-ai/schemastery` 的下限是 `^3.18.3`:`volatile()` 在该版本才存在,更早的 3.18.x 会让 `Config` 构造直接抛错。插件经 cordis harness 加载,并以 `dsh.bundle.patch` 注册为 bundle。
 - **Host 服务**(已对照原生源码校验):本条目 `Config` 的 `volatile()` 字段 + `.get()` 实时读取,提交后由 `ctx.on('loader/volatile-update', …)` 通知(不重挂插件);`ctx.get('settings').update('session-toolkit', patch)` 作为 host 写回条目 config 的入口(工作区自动补回用);`ctx.systemPrompt.section({ name, order, text, interpolate: false })`;`ctx.agents.{ get, resume({ resumeSessionId, agentOptions, setup }), roots, requireInitiator }`;`ctx.sessionController.resolveAgent(sessionId)`;`session.header` 字段(`cwd`、`origin`、`delegationDepth`、`parentSession`、`agentPreset`;没有 `seedLength`);用于等待晚到可选服务的 `ctx.inject(names, cb)`;`ctx.get('webServer').register({ kind: 'exact', path, handler })`;`@deepseek-ai/dsh-tools` 的 `defineTool` + `tools.register()`;以及 `ctx.get('agentDefaultModel')`、`sessionPersistence`、`sessionTitle`、`workspaceRegistry`、`sessionLogDownload`、`timer`、`on`、`effect`。
 - **Client 服务**(已校验):`window.__ModuleLoader__.load({ id, factory })`;`ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)`(**低 priority 遮蔽**);`ctx.get('configForms').get('session-toolkit')` → 表单 `{ getSnapshot()/.value/.status, subscribe, set(field, value), unset(field), mutate(ops, expectedRevision) }`(写入经 host 校验后落盘当前 profile 的 `cordis.patch.yml`);`ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`;只读状态路由 `GET /api/session-toolkit/state`;以及 `timer` client 服务(`ctx.timeout`)。bundle 的运行时 `require` 均解析自模块表种子词(`react`、`react/jsx-runtime`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`、……)。
 

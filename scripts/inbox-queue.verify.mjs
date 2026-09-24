@@ -228,6 +228,9 @@ const lastBefore = (events, type, idx) => {
   return -1
 }
 
+// 已开始的轮数（按数组下标计；事件上没有 idx 字段，**不能用 e.idx** —— 那会恒得 0）
+const turnNoAt = (events, idx) => { let n = 0; for (let k = 0; k <= idx && k < events.length; k += 1) { if (events[k].type === 'turn/start') n += 1 } return n }
+
 // ───────────────────────────────────────────────────────────── 自检
 if (selftest) {
   const p = logPath ?? path.join(SESSIONS_ROOT, 'session-b31c1e22-eca3-4f5a-a2a0-031288df33e1', 'session.v4.jsonl.zstd')
@@ -247,7 +250,8 @@ if (selftest) {
     fold.anomalies.length ? JSON.stringify(fold.anomalies.slice(0, 3)) : '')
 
   // ⭐⭐ 用**合成事件流**给两个方向各造一个实例 —— 自检**不能依赖本份日志恰好含有某种实例**，
-  //    否则"数据里没有该情形"会被读成"判据有问题"（本份日志是**改动前**的，真插入实例本就应为 0）。
+  //    否则"数据里没有该情形"会被读成"判据有问题"（默认读的那份会话日志**会被后续事件追加**：
+//    改动生效前插入实例为 0，生效后会变成 >=1 —— 判据不能依赖它，本门只把实际分布照实报出来）。
   //    合成流严格照内核语义：`pending.splice(start, removedCount ?? 0, ...inserted)`。
   const synth = {
     ok: (events) => foldInbox(events).anomalies.length === 0,
@@ -304,7 +308,16 @@ if (selftest) {
   if (byV.queued.length) console.log(`     例（queued）：${byV.queued[0].id}`)
   if (byV['inserted-live'].length) console.log(`     例（inserted-live）：${byV['inserted-live'][0].id}`)
   if (byV['delivered-idle'].length) console.log(`     例（delivered-idle）：${byV['delivered-idle'][0].id}`)
-  console.log(`     ⚠️ 本份日志是**改动前**的 ⇒ inserted-live 应为 0；若改动后它仍为 0，说明改动没生效。`)
+  const liveN = byV['inserted-live'].length
+  if (liveN > 0) {
+    console.log(`     ⇒ 本份日志里已有 ${liveN} 条「投递时有轮在跑、且在**同一轮**的步边界被收下」= 插入已生效。`)
+    console.log(`        （默认路径是**活会话文件**、会被后续事件追加；本行按数据自描述，不再写死"应为 0"。）`)
+  } else if (byV['delivered-idle'].length > 0) {
+    console.log(`     ⇒ 本份日志里只有「空闲时被收下」的实例（delivered-idle ${byV['delivered-idle'].length} 条），`
+      + `**没有**投递时有轮在跑的例子 ⇒ 由本份数据判不了"插入是否生效"，请换一份改动后的日志或看合成流自证。`)
+  } else {
+    console.log(`     info 本份日志里既无 inserted-live 也无 delivered-idle ⇒ 数据不足以判断改动是否生效（不是缺陷）。`)
+  }
 
   // ⭐ 基线实例（**通用**）：从本份日志里挑**第一条被投递且已消费**的 next-turn 消息 ——
   //    不写死 id，换日志也能跑。（写死的那条是找不找得到的问题，不是判据问题。）
@@ -320,7 +333,13 @@ if (selftest) {
     console.log(`  ── 基线实例 ${base}（本份日志里的第一条投递）──`)
     console.log(`     投递 idx=${br.delivery?.idx} seq=${br.delivery?.seq} ${T(br.delivery?.time)} target="${br.delivery?.target}"`)
     console.log(`     消费 idx=${br.consumption?.idx} seq=${br.consumption?.seq} ${T(br.consumption?.time)} via=${br.consumption?.via}`)
-    console.log(`     判定 ${br.verdict}（投递→消费间新 turn/start ${br.newTurnStartsBetween ?? '—'} 次）`)
+    const wait = (br.delivery?.time != null && br.consumption?.time != null)
+      ? `${br.consumption.time - br.delivery.time} ms` : '—'
+    const tAt = br.delivery ? turnNoAt(meta.events, br.delivery.idx) : -1
+    console.log(`     投递时已开始的轮数 ${tAt}${tAt === 0 ? '（会话尚未开始第一轮）' : ''} · 消费落在第 ${br.consumption ? turnNoAt(meta.events, br.consumption.idx) : '—'} 个 turn`)
+    console.log(`     判定 ${br.verdict}（投递→消费间新 turn/start ${br.newTurnStartsBetween ?? '—'} 次 · 实际等待 ${wait}）`)
+    console.log(`     ⇒ 「排队了」只说明"投递时没有可插的步边界"，**不说明等得久**：`
+      + `轮首即时收下（等待 ≈0，含"投递时会话尚未开始"与"轮间空闲"两种）也是 queued，等下一轮才收（可达数分钟）也是 queued。`)
     // 这是一个**真实实例**的读数（不是判据的自证 —— 自证已由上面的合成流完成）
     console.log(`     ⇒ 这是被查数据上的实测读数；它的具体结论由该条消息的实际情况决定，**不构成自检通过与否**。`)
     if (process.env.INBOX_BASE_ID) {
@@ -332,7 +351,7 @@ if (selftest) {
   if (bad === 0) {
     console.log('✅ 自检成立：判据**两个方向**都由合成实例证成（queued / inserted-live），'
       + '且把「idle 时被收下」单列为 delivered-idle（二值判据在那一格会给假绿）。')
-    console.log(`   真实日志（改动前）分布：queued ${byV.queued.length} · inserted-live ${byV['inserted-live'].length} · `
+    console.log(`   本份日志实际分布：queued ${byV.queued.length} · inserted-live ${byV['inserted-live'].length} · `
       + `delivered-idle ${byV['delivered-idle'].length} · pending ${byV.pending.length} · unknown ${byV.unknown.length}`)
     process.exit(EXIT.OK)
   }
@@ -370,7 +389,14 @@ if (asJson) {
   }
   console.log(`  判定    ${r.verdict}`)
   console.log(`  依据    ${r.why}`)
-  if (r.newTurnStartsBetween !== undefined) console.log(`  计数    投递→消费之间新 turn/start：${r.newTurnStartsBetween} 次`)
+  if (r.newTurnStartsBetween !== undefined) {
+    const waitMs = (r.delivery && r.consumption) ? `${r.consumption.time - r.delivery.time} ms` : '—'
+    const tAt = r.delivery ? turnNoAt(meta.events, r.delivery.idx) : '—'
+    console.log(`  计数    投递→消费之间新 turn/start：${r.newTurnStartsBetween} 次 · 实际等待 ${waitMs} · 投递时已开始的轮数 ${tAt}`)
+    if (r.verdict === 'queued') {
+      console.log(`  ⇒ 「queued」不含"等得久"之意：投递时无步边界可插（会话未开始 / 轮间空闲）也会是 queued（等待 ≈0）。`)
+    }
+  }
   if (r.delivery?.target !== undefined) {
     // ⚠️ "声明 vs 行为"只在**声明落空**时才报：`next-turn` 排队是本意，**不是**矛盾。
     //    （初版这里写死成"queued 且 target=next-turn 即不一致"，把本意读成了矛盾 —— 已修。）
