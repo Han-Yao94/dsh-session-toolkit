@@ -30,6 +30,7 @@
 import { spawnSync } from 'node:child_process'
 import {
   closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync,
+  statSync,
 } from 'node:fs'
 import { builtinModules } from 'node:module'
 import os from 'node:os'
@@ -38,13 +39,84 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const BUILTINS = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)])
-const CHECKED_JS = ['lib', 'scripts'].flatMap((dir) => {
+/**
+ * 递归列出目录下所有 `.js`/`.mjs`，返回相对 ROOT 的 posix 路径（升序）。
+ *
+ * 【为什么必须递归（裁定 #18 / BL-018，2026-09-24）】此处原先用单层 `readdirSync`，
+ * 于是**嵌套目录里的 JS 不进语法门**。当时 `scripts/lib/manifest-guard.mjs` 是唯一受害者：
+ * 它被两门 import、每跑必执行（语法错会立刻红），所以真实风险低 —— 但「碰巧有人跑它」
+ * 不是覆盖。**判据只能是"这个文件在 CHECKED_JS 里"**，不是"它恰好会被谁 import"。
+ *
+ * 不用 `scripts/lib/manifest-guard.mjs` 的 `manifest()`：那个清单按忽略表跳过
+ * `.git`/`node_modules`/`.pnpm-store`，而忽略表是为**护栏口径**定的；哪天它扩了，
+ * 语法门的覆盖面会跟着悄悄缩水。两者**同形但耦合方向不同**，故意各留一份。
+ *
+ * 【符号链接三条（裁定 #21，2026-09-24）—— 递归化引入的"静默丢覆盖"必须堵掉】
+ *   递归 walker 第一版只收 `e.isFile()`，于是三格从"有声"变成"无声"：
+ *     · `.js` 指向真实文件的链接：旧版（平铺）会收，新版**静默跳过** ⇒ 覆盖面反而缩了；
+ *     · `.js` 悬空链接：旧版跑 `node --check` **硬报红**，新版**静默跳过** ⇒ EXIT=0；
+ *     · 符号链接目录：不跟随（防环），但读数里**没有任何提示** ⇒ 同样读作"通过"。
+ *   判据仍是同一句：**"这个文件在 CHECKED_JS 里"**。看不出来的跳过不是覆盖，是漏覆盖。
+ *   故三条语义写死：①名字以 `.js`/`.mjs` 结尾且指向真实文件的链接 ⇒ **收**（跟不跟由名字定，不由形态定）；
+ *   ②名字以 `.js`/`.mjs` 结尾的悬空链接 ⇒ **报红**（与旧版一致）；③**符号链接目录 ⇒ 报红**
+ *   并说明"请改成真实目录"，**不做成一行 note 后继续绿** —— 本门无法证明其内容被覆盖。
+ *   判据：`LINK_VIOLATIONS` 非空即 FAIL —— 由 `checkSyntax()` 里那条 `for (… ) fail('syntax/link', v)`
+ *   落实。另有一道**与本条无关**的既有前置：「未发现任何待检查的 JS 文件」——那是**树本身没有 JS**
+ *   （例如整棵 `lib/` 的内容都在被拒的链接目录里，清单因此为空）。**不要**把这一格做成提前返回：那样会
+ *   静默丢掉该目录之后/同层其余文件的覆盖，正是本条要堵的漏覆盖。
+ */
+function listJsFiles(dir) {
   const abs = path.join(ROOT, dir)
+  // 根目录不存在 ⇒ 空清单。此路径被既有用例 `syntax-empty` 覆盖（它构造一棵没有 lib/ 与 scripts/
+  // 的树，期望「未发现任何待检查的 JS 文件」）；删掉这个 `existsSync` 会让该用例因 ENOENT 崩掉而红
+  //（2026-09-24 实测的连带翻转，已回填）。
   if (!existsSync(abs)) return []
-  return readdirSync(abs)
-    .filter((f) => f.endsWith('.js') || f.endsWith('.mjs'))
-    .map((f) => path.posix.join(dir, f))
-}).concat(existsSync(path.join(ROOT, 'client/client.js')) ? ['client/client.js'] : [])
+  const out = []
+  const push = (p) => { out.push(`${dir}/${p}`) }
+  const walk = (d, rel) => {
+    const entries = readdirSync(d, { withFileTypes: true })
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    for (const e of entries) {
+      const childRel = rel === '' ? e.name : `${rel}/${e.name}`
+      const childAbs = path.join(d, e.name)
+      const jsish = e.name.endsWith('.js') || e.name.endsWith('.mjs')
+      // 悬空符号链接：statSync 抛 ENOENT。必须先单独识别，否则它会被当成"普通文件"去 node --check
+      //（那也能红，但报出的是 `Cannot find module` 而不是"这个链接是断的"，归因不准）。
+      let stat = null
+      let brokenLink = false
+      if (e.isSymbolicLink()) {
+        try { stat = statSync(childAbs) } catch { brokenLink = true }
+      }
+      if (brokenLink) {
+        if (jsish) LINK_VIOLATIONS.push(`${dir}/${childRel} 是**悬空符号链接**：必须修好或删除。按名字它该被检查，实际读不到 ⇒ 不得读作"通过"。`)
+        else LINK_VIOLATIONS.push(`${dir}/${childRel} 是悬空符号链接（名字不以 .js/.mjs 结尾，本门无法判断该怎么处理）⇒ 报红而不是跳过。`)
+        continue
+      }
+      const isDir = stat ? stat.isDirectory() : e.isDirectory()
+      if (isDir) {
+        if (e.isSymbolicLink()) {
+          LINK_VIOLATIONS.push(`${dir}/${childRel} 是**符号链接目录**：本门不跟随符号链接目录（避免环），请改成真实目录 —— 否则无法证明该目录下的 JS 被覆盖。`)
+          continue
+        }
+        walk(childAbs, childRel)
+        continue
+      }
+      if (jsish) push(childRel)
+    }
+  }
+  walk(path.join(ROOT, dir), '')
+  return out
+}
+
+/** 符号链接形态的三类违规（见 `listJsFiles` 注释）。非空即让语法门 FAIL，**不降级为 note**。 */
+const LINK_VIOLATIONS = []
+
+const CHECKED_JS = ['lib', 'scripts'].flatMap((d) => listJsFiles(d) ?? [])
+  // `?? []` 是**纯防御，当前 `listJsFiles` 不会返回 null/undefined**（它只有 `return out` 与
+  // 根目录不存在时的 `return []` 两条返回路径）⇒ 这半句不冒充机制，留着只为函数签名变化时兜底。
+  // 「符号链接目录」那一格的报红**不靠这里**：它在 `walk` 里 `continue`、**其余条目照常走完**，
+  // 由 `checkSyntax()` 里 `LINK_VIOLATIONS` 那条 `fail()` 报，与本行无关。
+  .concat(existsSync(path.join(ROOT, 'client/client.js')) ? ['client/client.js'] : [])
 
 /**
  * 「表示本包当前版本」的识别模式（docs 定向断言用）。
@@ -122,6 +194,9 @@ function checkSyntax() {
     else if (r.status !== 0) fail('syntax', `${rel} 语法错误：\n${tail(r.output)}`)
     else ok(rel)
   }
+  // 放在最后只为**可读性**：先让每个被检查的 JS 打出 `ok`/语法错，再把符号链接形态的违规列在后面，
+  // 两类读数不交错。**不是**机制所需 —— `LINK_VIOLATIONS` 无论放哪都会 `fail()`，报红不依赖循环顺序。
+  for (const v of LINK_VIOLATIONS) fail('syntax/link', v)
 }
 
 // ---------------------------------------------------------------- 打包契约

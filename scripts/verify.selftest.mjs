@@ -37,7 +37,7 @@
 import { spawnSync } from 'node:child_process'
 import {
   appendFileSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync,
-  readFileSync, readdirSync, rmSync, writeFileSync,
+  readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -153,6 +153,39 @@ const CASES = [
   {
     id: 'syntax-error', kind: 'red', marker: 'syntax: lib/sanitize.js 语法错误',
     mutate: (d) => appendFileSync(path.join(d, 'lib/sanitize.js'), '\nfunction broken( {\n'),
+  },
+  {
+    // 裁定 #18 / BL-018：`CHECKED_JS` 曾用单层 readdir ⇒ 嵌套目录里的 JS 完全不进语法门。
+    // 本用例造一个**两层嵌套**、内容有语法错的 .js：递归后必须被 `node --check` 抓到并逐字报出路径。
+    // 自证如何能失败：把 `listJsFiles()` 的 `if (e.isDirectory()) walk(...)` 去掉 ⇒ EXIT=0 ⇒ 本用例红。
+    id: 'syntax-error-nested', kind: 'red', marker: 'syntax: lib/deeply/nested/legacy.js 语法错误',
+    mutate: (d) => {
+      mkdirSync(path.join(d, 'lib/deeply/nested'), { recursive: true })
+      writeFileSync(path.join(d, 'lib/deeply/nested/legacy.js'), 'function broken( {\n')
+    },
+  },
+  {
+    // 裁定 #21-symlink-1：名字以 .js 结尾、指向真实文件的符号链接**必须进 CHECKED_JS**。
+    // （递归 walker 第一版只收 `e.isFile()`，对链接返回 false ⇒ 静默跳过，覆盖面反而比旧版缩了。）
+    id: 'syntax-symlink-to-broken', kind: 'red', marker: 'syntax: lib/link_to_broken.js 语法错误',
+    mutate: (d) => {
+      writeFileSync(path.join(d, 'lib/broken-target.js'), 'function broken( {\n')
+      symlinkSync('./broken-target.js', path.join(d, 'lib/link_to_broken.js'))
+    },
+  },
+  {
+    // 裁定 #21-symlink-2：悬空链接必须**大声报红**（旧版平铺会把它交给 node --check 硬红；递归第一版静默跳过 ⇒ EXIT=0）。
+    id: 'syntax-symlink-dangling', kind: 'red', marker: 'syntax/link: lib/dangling.js 是**悬空符号链接**',
+    mutate: (d) => symlinkSync('/nonexistent-target-xyz', path.join(d, 'lib/dangling.js')),
+  },
+  {
+    // 裁定 #21-symlink-3：符号链接目录**不跟随**（防环），但必须报红并说明"请改成真实目录"。
+    // 不许做成"打印一行 note 然后继续绿" —— 本门无法证明该目录下的内容被覆盖。
+    id: 'syntax-symlink-dir', kind: 'red', marker: '本门不跟随符号链接目录（避免环），请改成真实目录',
+    mutate: (d) => {
+      mkdirSync(path.join(d, 'lib/real-dir'), { recursive: true })
+      symlinkSync('./real-dir', path.join(d, 'lib/linkdir'))
+    },
   },
   {
     id: 'build-step', kind: 'red', marker: 'pack/build-step: package.json 出现构建脚本 prepare',
