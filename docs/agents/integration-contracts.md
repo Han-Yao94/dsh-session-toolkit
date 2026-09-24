@@ -30,7 +30,7 @@
 
 被引文件的 SHA256 + 字节数。**任一不匹配 ⇒ 本表对应引用自动作废，必须逐行重核后重新落锚**（重核 = 按 §D.3 重新抽取 + 人工过一遍行号）。
 
-| 被引文件 | SHA256（2026-09-22 重落锚：settings 数据面迁移到条目 Config） | 字节 |
+| 被引文件 | SHA256（2026-09-22 重落锚：settings 数据面迁移到条目 Config；**2026-09-24 重落锚：0.1.12 版本位变动** ⇒ 仅 `package.json` 与 `README.zh.md` 两行更新） | 字节 |
 |---|---|---|
 | `lib/index.js` | `CAAC5D14A6AF201328C3FE054D89259CD3BF99FD5B58D3649C375A7F88A88FFA` | 5903 |
 | `lib/identity.js` | `87522FC6863EE9E5FE6459906AE335AA09966E09891CC76323B3DAD5F7CF273E` | 2980 |
@@ -43,8 +43,8 @@
 | `lib/peer-message.js` | `6A812DED9570A1C9A4B1B2C2A681008511812C02001AD03D017EC7A9FDF86094` | 10376 |
 | `lib/log-reposition.js` | `491282BF9C233C5449E96C3F203663B59B63A229AA22CEF48E5931E49CD0B03E` | 280 |
 | `client/client.js` | `B814FACBF3E54ACFC0DDE8FD7878B1555FFC7B5DAEEC190F1FEE933FEC7D3C3C` | 137264 |
-| `package.json` | `8C940C5A44B60B2633B74DADA2E273234703AEAFCBB83167DD2A1137234F8051` | 1697 |
-| `README.zh.md` | `52C98B52EFD53FC518F64D485235BD143966FA4A8F558F6B14F4448D278B50A6` | 41141 |
+| `package.json` | `809FE20B694850EE00CD07EA2289AB86039B1F85251E16C1466D7EC29F8BDA96` | 1697 |
+| `README.zh.md` | `4EDDA25C7449694AC31A540270256C180BF349512745614F8CF3FD42721681F3` | 41141 |
 | `cordis.patch.yml` | `9CB32E70D0C4C98255D83F7BF7D1D67F0B2803E88676B864D9FA84E4A4C2D826` | 285 |
 
 **为什么锚这 13 个**：它们就是本表用行号引用的全部仓库内文件（2026-09-22 调整：删去已不存在的 `lib/ui-config.js`——设置通道迁移后该文件已删除；`lib/prompt-literal.js` 自 2026-09-18 起在表内）。**`README.md` 未锚**（本表只用行号引 `README.zh.md`；`README.md` 的一致性由 `pnpm verify` 的双语版本断言守）。**`docs/agents/**` 自身不锚**（本表是锚的**持有者**，自锚会自引用）。
