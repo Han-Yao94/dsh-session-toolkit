@@ -162,6 +162,31 @@ jobs:
           node-version: 20
       - run: node scripts/scope-identifiers.assert.mjs --selftest
 
+  workspace-prompt-guard:
+    # 工作区提示词不被写空（`lib/global-prompt.js`）：五格判据（正文保持 / files 不被整体替换 /
+    # 未点名条目不连带 / removed 三条契约 / 回写只带新增条目）。`--selftest` 必须带：只跑真实对照
+    # 就漏掉了「门自己还能不能红」这半边（M1 取值层级 / M2 removed ref / M3 回写作用域）。
+    #
+    # 为什么本门**可以**挂 CI（判据同 `:119 request-guard` 那段：红是否可被合理驳回）：
+    # ① 零外部输入 —— 只读本仓库 `lib/global-prompt.js`，其余全在 os.tmpdir() 的副本里跑，
+    #    不读已装 profile、不读 harness checkout、不打任何端口 ⇒ 在只有插件仓库的 CI 里也能给出真判定；
+    # ② 属**契约门** —— 它的红只有一个动作（修 `lib/` 或修门），没有"这次可以放过"的合法理由。
+    # 为什么值得占一个 job（2026-09-26 实证）：本缺陷在盘上活了很久，症状是「用户粘贴的正文变成空」，
+    # 而当时**全部门都绿** —— 语法门、打包门、锚门、primitive 导出门与「写回语义」都不相交。
+    #
+    # 与 §D 步骤 10 那两条「不挂 CI」的门对照：`dependency-skew` 要 `<DSH_HOME>/profiles/web`、
+    # `dsh-log-ui.drift` 要 harness checkout ⇒ 那两条在纯插件仓库的 CI 里会退化成「未完成验证」的假红；
+    # 本门不需要任何外部路径，故挂着不退化。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/workspace-prompt.guard.assert.mjs --selftest
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
@@ -175,7 +200,7 @@ jobs:
     #     （对照：`:46 dependency-skew.measure.mjs --selftest` 与 `:47 dsh-log-ui.drift.mjs --selftest`
     #      确实在 `selftest` job 里跑 —— 它们是**不需要外部 checkout**的自证步骤；本条之所以例外在
     #      「不进任何步骤」，理由是上面的"可被合理驳回"，与它们能否在 CI 跑无关。）
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard]
     # ⚠️ `request-guard` **加入 needs**（D 的判断；按上面的分界判据，它是契约门而非探测器，故不冲突）：
     #   判据同上：**红是否可被合理驳回**。
     #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），

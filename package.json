@@ -32,7 +32,9 @@
     "check": "node scripts/verify.mjs syntax",
     "verify": "node scripts/verify.mjs",
     "assert:clamp": "node scripts/clamp-call.assert.mjs",
-    "assert:clamp:selftest": "node scripts/clamp-call.assert.mjs --selftest"
+    "assert:clamp:selftest": "node scripts/clamp-call.assert.mjs --selftest",
+    "assert:workspace-prompt": "node scripts/workspace-prompt.guard.assert.mjs",
+    "assert:workspace-prompt:selftest": "node scripts/workspace-prompt.guard.assert.mjs --selftest"
   },
   "main": "lib/index.js",
   "exports": {
