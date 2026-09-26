@@ -297,14 +297,37 @@ function splitSections(buf, boundaries) {
   return { sections: out, lines, preambleBytes: headLine[0] > 0 ? lines[headLine[0]].s : 0 }
 }
 
-/** 从节标题里取可读标签：优先 ASCII 数字（`## 25. 标题`），否则用序号。 */
+/** 从节标题里取可读标签：优先题号，否则用序号（**不带 § 前缀**；拼 § 由下游模板自己负责）。 */
 function labelFor(sec) {
   if (sec.ordinal !== null && sec.ordinal !== undefined) return `§${sec.ordinal}`
   return `§${sec.idx}`
 }
+/**
+ * 工具**自己生成**的段（不是人类手写的正文节）：元数据块、归档索引、读法。
+ * 判据用「字节级标记 + 固定标题」，不用「标题里有没有数字」—— 判据越依赖标题文本，
+ * 越会在有人改措辞时静默失效（本文件刚因「片名取序号而非题号」栽过一次，见裁定 #42）。
+ * ⚠ 这条闸门是**独立于** ordinalOf 正则的第二道：即使有人把正则放宽，生成段也拿不到题号。
+ */
+const GENERATED_SECTION_TITLES = [
+  META_BEGIN,        // 元数据块：<!-- board-rotate:begin -->
+  '## 归档索引',
+  '## 读法（§4.13.2b）',
+]
+function isGeneratedSection(sec) {
+  if (!sec) return false
+  if (Number(sec.idx) === 0) return true                      // preamble（抬头），工具合成，从来不是正文节
+  return GENERATED_SECTION_TITLES.includes(String(sec.title || '').trim())
+}
+/**
+ * 从节标题里取题号：**只认 `## §N` 这种题号式**，且工具自生成的段一律豁免（返回 null ⇒ 回落序号标签）。
+ * ⚠ 已知失效面（裁定 #43 的残留限制，写在这里免得下一个人重新发现）：`## 25. 标题` 这类
+ * 「无 § 的旧式编号」**取不到题号**，会回落成序号 —— 这是**刻意的**：旧正则 `/^#{1,6}\s*§?\s*(\d+)/`
+ * 会把 `## 152. 无 § 的题号式` 里的 152 当题号，而 152 在本板的语义里不是节号。
+ * 若将来要认旧式编号，必须**同时**保证生成段豁免仍然生效，否则又会给生成段发号。
+ */
 function ordinalOf(sec) {
-  if (!sec.title) return null
-  const m = /^#{1,6}\s*§?\s*(\d+)/.exec(sec.title)
+  if (!sec || isGeneratedSection(sec)) return null
+  const m = /^#{1,6}\s*§\s*(\d+)(?:\s|$)/.exec(sec.title || '')
   return m ? Number(m[1]) : null
 }
 
@@ -396,6 +419,9 @@ function renderShardHeader(md, shard) {
   L.push(`> **归档片，只增不改**（\`team-charter.md\` §4.13.2b-4）。更正写进当前活动片 \`board/${md.role}.md\`，并注明「更正了 ${shard.file} 的 <哪一处>」。`)
   L.push('> 本片由 `scripts/board-rotate.mjs` 机械切出；**片头之后的正文 = 原文件的一段连续字节**，拼接校验见活动片的 `board-rotate:meta`。')
   L.push('> 取用：`grep` 本片，或按活动片索引定位；**不需要读整片**。')
+  // 口径说明（裁定 #43-1）。为什么要写：片名/索引里的 §N 有**两种来源**（真题号 / 无题号时的本代序号），
+  // 而在「归档段从文件中段开始」的代里两者会差很多（第 2 代实测：序号 1–20 ↔ 题号 122–139）。
+  L.push('> **本节区间口径**：有 § 标题用其题号，无题号者用本代序号。**编号只作指路，不作判据**；判据是 §0 内容锚与字节/摘要。')
   L.push('')
   L.push(`- 源文件：\`${md.source}\``)
   // 裁定 #29.5：片头必须自证「本片属于第几代」，并带上该代的源指纹。
@@ -437,6 +463,10 @@ function renderArchiveIndex(shards, m) {
   // 因此每行自足携带：片名（含 part k/m，唯一）· 原始节区间 · **该片在原始文件中的字节区间 start..end**
   // · 正文字节 · 正文行数 · 正文 sha256 · 整片 sha256。
   // 「读它的哪一段」= 字节区间列；「读哪个文件」= 片名列（part 标记保证它在多切时仍唯一）。
+  // ⚠ 「原节区间」列的口径见下方 L.push 的口径句 —— 它是片头「本节区间口径」句的同一条，
+  //    两处必须逐字一致（否则读者会以为片名与索引用的不是同一套编号）。
+  L.push('> **原节区间口径**：有 § 标题用其题号，无题号者用本代序号。**编号只作指路，不作判据**；判据是 §0 内容锚与字节/摘要。')
+  L.push('')
   L.push('| 片 | 段 | 原节区间 | 该片在原始文件中的字节区间 | 正文字节 | 正文行数 | 正文 sha256 | 整片 sha256 |')
   L.push('|---|---|---|---|---|---|---|---|')
   for (const s of shards) {
@@ -1106,7 +1136,10 @@ function main() {
     s.lines = countLines(buf.subarray(s.startByte, s.endByte))
     s.sha256 = sha(buf.subarray(s.startByte, s.endByte))
     s.ordinal = ordinalOf(s)
-    s.label = labelFor(s)
+    // 归一：`s.label` 一律**不带 § 前缀**（下游片名 `sh.file` / 片头 `renderShardHeader` /
+    // 归档索引行 / 保留区间行 `renderActive` 各自拼 §）。不归一就会印出 `§§122` —— 实测过（裁定 #43）。
+    // ⚠ 这里刻意**不写行号**（本文件自己的插入会让行号立刻腐）。
+    s.label = labelFor(s).replace(/^§/, '')
   }
   const preambleText = preambleBytes > 0 ? buf.subarray(0, preambleBytes).toString('utf8') : ''
 
@@ -1240,8 +1273,11 @@ function main() {
     out.forEach((sh, i) => {
       sh.seq = seqBase + i + 1                      // #29.5：跨代续号（第一代 seqBase=0 ⇒ 1,2,3…）
       sh.seq3 = String(sh.seq).padStart(3, '0')
-      sh.fromLabel = sh.secIdxs.length ? secOf(sh.secIdxs[0]).idx : 0
-      sh.toLabel = sh.secIdxs.length ? secOf(sh.secIdxs[sh.secIdxs.length - 1]).idx : 0
+      // 裁定 #43：片名/区间取 `sec.label`（**题号**；无题号者回落本代序号），不再取 `sec.idx`（纯序号）。
+      // 旧写法在「归档段从文件开头开始」的第 1 代看不见缺陷，第 2 代归档中段（序号 3 起 = `## §122` 起）
+      // 立刻打架：片名写 `§1–§20`，片内正文却是 `§122–§141` ⇒ 按节号检索的人找不到片。
+      sh.fromLabel = sh.secIdxs.length ? secOf(sh.secIdxs[0]).label : ''
+      sh.toLabel = sh.secIdxs.length ? secOf(sh.secIdxs[sh.secIdxs.length - 1]).label : ''
       sh.partK = null
       sh.partM = null
       if (sh.splitSection) {
