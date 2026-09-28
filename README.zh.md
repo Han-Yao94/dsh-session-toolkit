@@ -14,15 +14,18 @@ DeepSeek Harness 的整合插件工具箱。将先前 5 个独立的本地插件
 每会话人设提示词注入该会话系统提示词(独立段 `session-identity`,order 40,每次组装按 agent 求值),支持默认身份与每会话覆盖。UI:身份浮层(启用开关、4000 字符软上限、保存/重置、编辑默认身份、继承默认身份)及双入口状态按钮:`conversation.session.header.actions`(id `session-identity`,order 40)与 `conversation.input.left`(id `session-identity-input`,order 40)。浮层卡片可按**标题行拖动**:位移每次移动都被钳制在视口内、窗口缩放时重新钳制;卡片比视口大时**每个轴都仍可移动**,四个边都能拖到。位置不持久化,浮层关闭即复位。
 
 ### 全局提示词(Global Prompt)
-设置页(`settings.section`,id `global-prompt`,order 30),以 **Tabs(全局 / 按工作区)** 渲染。*全局* Tab 注入一段作用于所有会话系统提示词的文本(段 `global-prompt`,order 50);*按工作区* Tab 注入按工作区提示词(段 `workspace-prompt`,order 60)。两个段都以 **`interpolate: false`** 注册:提示词文本与引用文件里的 `{{...}}` 一律按字面保留,用户内容永不被改写,未注册的 `{{name}}` 也不可能让组装失败。0.1.6 之前的内核没有分段的 `interpolate` 开关,由 `lib/prompt-literal.js` 在组装结果上退化为 `{` 连续串空格化。
+设置页(`settings.section`,id `global-prompt`,order 30),以 **Tabs(全局 / 按工作区 / 组)** 渲染。*全局* Tab 注入一段作用于所有会话系统提示词的文本(段 `global-prompt`,order 50);*按工作区* Tab 注入按工作区提示词(段 `workspace-prompt`,order 60);*组* Tab 注入按组提示词(段 `group-prompt`,order 55——见[组提示词](#组提示词group-prompt))。四个提示词段(含 `session-identity`,order 40)都以 **`interpolate: false`** 注册:提示词文本与引用文件里的 `{{...}}` 一律按字面保留,用户内容永不被改写,未注册的 `{{name}}` 也不可能让组装失败。0.1.6 之前的内核没有分段的 `interpolate` 开关,由 `lib/prompt-literal.js` 在组装结果上退化为 `{` 连续串空格化。
 
-同一个 webServer 上另注册只读状态路由 `GET /api/session-toolkit/state`(活跃工作区 + 引用文件读取状态;非 `GET` 一律 405),设置页据此读取那两项运行时投影——它们不占 settings 命名空间、也从不落盘。
+同一个 webServer 上另注册只读状态路由 `GET /api/session-toolkit/state`(活跃工作区 + 引用文件读取状态 + 组选择器要用的在线会话清单;非 `GET` 一律 405),设置页据此读取这些运行时投影——它们不占 settings 命名空间、也从不落盘。
 
 ### 工作区提示词(Workspace Prompt)
 为 `cwd` 前缀匹配到已配置工作区目录(该目录及子目录)的会话注入按工作区提示词。工作区列表由**活跃会话的 `cwd`** 聚合而来(`ctx.agents.roots()`,去重并按会话数计数)。当多个已启用工作区前缀命中某会话的 `cwd` 时,取**最具体(路径最深/最长)**者。`removed` 记录用户已移除的路径,使活跃工作区同步不重新补回。工作区行的启用开关 **即时保存(live-save)**;「保存」按钮仅持久化提示词**内容 + 引用文件**。
 
+### 组提示词(Group Prompt)
+设置页上的第三个 Tab:**组**。每个组是一条具名条目:启用开关、提示词正文、引用文件列表,以及**显式的成员会话 id 列表**;匹配依据是**该会话自己的 id**,不是它所在目录——这正是「一个组可以跨工作区」的原因。组是**额外的一层**:它不取代全局提示词,也不取代按工作区提示词。所有启用且 `sessions` 含当前会话 id 的组都注入到段 `group-prompt`(order 55,夹在全局 50 与工作区 60 之间),命中的多个组按**组键序**拼接,块与块之间留一个空行。选择器**只列在线(live)会话**,且**从不自动入组**:新会话在你勾选之前不属于任何组;已存在组里但当前离线的会话标为**未在线**(可移除)。组装上下文里取不到会话 id 时,该段注入空。
+
 ### 引用文件(Referenced Files)
-全局提示词与工作区提示词均可引用**文件列表**。每次组装重新读取每个引用文件(UTF-8;按 `mtimeMs` + 大小缓存,未变化的文件不重复读盘),注入到提示词文本之后。有字节预算(`globalPrompt.maxFileBytes` / `maxTotalBytes`,默认 256 KiB / 1 MiB):超限文件**跳过**而不是阻塞组装。读取失败同样跳过,两种情况都在 UI 中显示具体原因。支持纯文本/markdown。每个文件的读取状态是 host 的**运行时投影**,经只读路由 `GET /api/session-toolkit/state` 送到 UI(`ok`:N 字符 / `fail`:原因 / 未读取),浏览器半只在设置页打开期间轮询它;**状态不写入任何配置文件**,内容未变时不重建投影。
+全局提示词、工作区提示词与组提示词均可引用**文件列表**。每次组装重新读取每个引用文件(UTF-8;按 `mtimeMs` + 大小缓存,未变化的文件不重复读盘),注入到提示词文本之后。有字节预算(`globalPrompt.maxFileBytes` / `maxTotalBytes`,默认 256 KiB / 1 MiB):超限文件**跳过**而不是阻塞组装。读取失败同样跳过,两种情况都在 UI 中显示具体原因。支持纯文本/markdown。每个文件的读取状态是 host 的**运行时投影**,经只读路由 `GET /api/session-toolkit/state` 送到 UI(`ok`:N 字符 / `fail`:原因 / 未读取),浏览器半只在设置页打开期间轮询它;**状态不写入任何配置文件**,内容未变时不重建投影。
 
 ### 会话自动恢复(Session Auto-Resume)
 开启开关的会话在 GUI 重启后自动恢复,优先走**官方恢复链路**(`ctx.sessionController.resolveAgent`)——它除了 mount preset,还会通过 `installSelection` 恢复会话自己的模型选择,并做 subagent 归属校验与并发恢复去重;0.1.6 之前没有该服务的内核回落为 `ctx.agents.resume` + 手工 mount preset,并携带 `agentDefaultModel` 的默认模型。开启某会话即立即恢复(false→true 边沿)。过滤:开关开启、仅顶层(无 subagent origin、无 `delegationDepth > 0`、无 `parentSession`)、非空白(快照形状的 `eventCount !== 0`)。并发受限(`CONCURRENCY = 3`),逐项失败隔离 + 在途集合防重复恢复。
@@ -49,7 +52,7 @@ host 平面另注册两个工具,**与 `send_to_session` / `list_sessions` 同�
 host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区路径寻址会话、wakeup 投递),并在 `conversation.session.header.actions`(id `copy-session-id`,order 30)与 `conversation.input.left`(id `copy-session-id-input`,order 30)各加「复制会话 ID」按钮。发出消息内容在投递前经 `toPlainText` 转为纯文本,接收方看到整洁文本而非原始 markdown。**`wakeup` 有两条不同的投递路径**:`wakeup: true`(走 `steer`)时,目标**正在执行** ⇒ 消息进**当前轮的下一个步边界**(既不新开一轮,也不打断当前步);目标**空闲** ⇒ 立刻开一轮;`wakeup: false`(走 `inject`)只投递、不唤醒任何人。**两种情形仍会排队而不是插入**:投递时目标空闲(没有步边界可插,消息在下一个轮次边界被收下),以及内核的 `wakingAfterAbort` 重分类(上一个活动正在被取消时,`steer` 被静默降级为 `next-turn`)。因此 `steer` **不是**「消息永不等待」的承诺——判断一条消息是否真的插入,要看三件事同时成立:`target` 是 `next-step`、投递时有轮在跑、且投递到消费之间**没有新的 `turn/start`**。
 
 ### 提示词去重(Prompt Dedup)
-对 **身份 / 全局 / 工作区** 三段系统提示词(段 `session-identity`、`global-prompt`、`workspace-prompt`,order 40/50/60)做**跨段行级去重**。`promptDedup.enabled` 默认开启(仅显式设为 false 时禁用)。按 `\n` 切分,三段内出现过的**完全相同原行**只保留"先出现"那一份(全局 `seen` 贯穿三段,同段内部自重复也收敛),后出现段的重复行被去掉;任何段独有内容一律保留。**空行(含只有空白的行)不参与去重**——空行是 markdown 的段落/列表分隔,把它当成重复行会让第一段之后的每一段空行都被删掉。不解析 `{{name}}` 占位符(单行完整组,按行切分不会切断)、不破坏 markdown、不设 complete,绝不动 harness 自带段(`harness:identity` / `deployment:persona` / 工具段)。机制:在插件根 ctx 订阅 `system-prompt/assemble` waterfall,`await next()` 后对返回结果的 `sections` 做去重再返回。
+对 **身份 / 全局 / 组 / 工作区** 四段系统提示词(段 `session-identity`、`global-prompt`、`group-prompt`、`workspace-prompt`,order 40/50/55/60)做**跨段行级去重**。`promptDedup.enabled` 默认开启(仅显式设为 false 时禁用)。按 `\n` 切分,四段内出现过的**完全相同原行**只保留"先出现"那一份(全局 `seen` 贯穿四段,同段内部自重复也收敛),后出现段的重复行被去掉;任何段独有内容一律保留。**空行(含只有空白的行)不参与去重**——空行是 markdown 的段落/列表分隔,把它当成重复行会让第一段之后的每一段空行都被删掉。不解析 `{{name}}` 占位符(单行完整组,按行切分不会切断)、不破坏 markdown、不设 complete,绝不动 harness 自带段(`harness:identity` / `deployment:persona` / 工具段)。机制:在插件根 ctx 订阅 `system-prompt/assemble` waterfall,`await next()` 后对返回结果的 `sections` 做去重再返回。
 
 ---
 
@@ -75,14 +78,14 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 
 ## 架构
 
-- **Host 半** —— `lib/index.js` 组装八个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` 两组 volatile 字段的读取、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读)、活跃工作区聚合(`agents.roots()` → `GET /api/session-toolkit/state`),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
-- **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;五个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件;每文件状态来自 `GET /api/session-toolkit/state` 的轮询投影)。
+- **Host 半** —— `lib/index.js` 组装八个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` / `groupPrompt` 三组 volatile 字段的读取、三个提示词段(`global-prompt` order 50 / `workspace-prompt` order 60 / `group-prompt` order 55)、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读;缓存**按段命名空间隔离**,一段的剔除不会误删另一段的条目)、运行时投影聚合(活跃工作区 + 在线会话清单,经 `GET /api/session-toolkit/state` 送出),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
+- **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;五个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区 / 组)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件;每文件状态来自 `GET /api/session-toolkit/state` 的轮询投影)与组编辑器(组的新增/改名/删除、启用开关、正文、引用文件,以及会话选择器:在线会话按 `title ?? 短 id` 列出,已存但离线的成员标**未在线**)。
 
 ### 注册的 Slots
 
 | Slot | Id | Order / priority | 功能 |
 |---|---|---|---|
-| `settings.section` | `global-prompt` | order 30 | 全局 + 工作区提示词页(Tabs) |
+| `settings.section` | `global-prompt` | order 30 | 全局 + 工作区 + 组提示词页(Tabs) |
 | `conversation.session.header.actions` | `copy-session-id` | order 30 | 复制会话 ID |
 | `conversation.session.header.actions` | `session-identity` | order 40 | 身份按钮 |
 | `conversation.session.header.actions` | `session-log-download-moved` | order 41 | Session log 下载 |
@@ -106,9 +109,10 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 | `globalPrompt.{enabled,content,files}` | `{enabled: boolean, content: string, files: string[]}` | 启用时注入所有会话。`files` 为引用文件列表,组装时读取并追加(按 mtime/大小缓存;读取失败或超限的文件跳过)。 |
 | `workspacePrompt.workspaces` | `Record<path,{enabled, content, files: string[]}>` | 按工作区提示词。某会话会得到与其 `cwd` 目录前缀匹配、路径最深(最具体)且启用的工作区提示词。 |
 | `workspacePrompt.removed` | `string[]` | 用户已移除的路径,使活跃工作区同步不重新补回。 |
+| `groupPrompt.groups` | `Record<groupKey,{enabled, content, files: string[], sessions: string[]}>` | 具名组(**字典键即组名**)。`enabled` 且其 `sessions` 含当前会话 id 时注入该组提示词(段 `group-prompt`,order 55)——成员资格按会话 id 判定,所以一个组可跨工作区;组是**额外**的一层,全局与按工作区提示词照常生效。v1 只列在线会话,且从不自动入组。 |
 | `client.*` | 2 个 UI 旋钮(见下表) | 浏览器半的运行时参数(字符上限、复制反馈)。 |
 
-**运行时投影(不落盘、不属于 config)**:活跃工作区 `[{path, sessionCount}]` 来自 **`ctx.agents.roots()`**(各 agent 的 `session.header.cwd` 去重计数;不来自本插件作用域不可见的 `workspaceRegistry`),引用文件读取状态为 `Record<global\|path, [{filePath, status: 'ok'\|'fail', charCount?, reason?}]>`;两者都经 `GET /api/session-toolkit/state` 提供给设置页。
+**运行时投影(不落盘、不属于 config)**:活跃工作区 `[{path, sessionCount}]` 来自 **`ctx.agents.roots()`**(各 agent 的 `session.header.cwd` 去重计数;不来自本插件作用域不可见的 `workspaceRegistry`),组选择器要用的在线会话清单 `[{id, cwd, title}]`(标题取自可选服务 `sessionTitle`,服务缺失或抛错时为 `null`——读标题绝不能让路由失败),引用文件读取状态为 `Record<global\|path, [{filePath, status: 'ok'\|'fail', charCount?, reason?}]>`;两者都经 `GET /api/session-toolkit/state` 提供给设置页。
 
 ### 插件 Config(cordis)
 
@@ -136,11 +140,14 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
     workspacePrompt:          # volatile:按工作区提示词
       workspaces: {}          # Record<path, {enabled, content, files}>
       removed: []             # 用户已移除的路径
+    groupPrompt:
+      sectionOrder: 55
+      groups: {}              # volatile:Record<groupKey, {enabled, content, files, sessions}>
     autoResume:
       concurrency: 3
       sessions: {}            # volatile:Record<sessionId, boolean>
     promptDedup:
-      enabled: true           # 三段(身份/全局/工作区)跨段行级去重开关;默认 true = 开启(仅显式设为 false 时禁用)
+      enabled: true           # 四段(身份/全局/组/工作区)跨段行级去重开关;默认 true = 开启(仅显式设为 false 时禁用)
     client:
       identityCharLimit: 4000 # volatile:以下 2 键都由浏览器半读取
       copyFeedbackMs: 1600
@@ -152,10 +159,11 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 | `identity.sectionOrder` | 40 | 身份段在系统提示词中的顺序。**迁移**:显式固定 `identity.sectionOrder: 55` 的用户需改为 40 以保持「身份 → 全局 → 工作区」顺序。 |
 | `globalPrompt.sectionOrder` | 50 | 全局提示词段的顺序。 |
 | `globalPrompt.workspaceSectionOrder` | 60 | 工作区提示词段的顺序(置于最后)。 |
+| `groupPrompt.sectionOrder` | 55 | 组提示词段的顺序(夹在全局 50 与工作区 60 之间;命中的多个组按组键序拼接,块间留一个空行)。 |
 | `globalPrompt.maxFileBytes` | 262144 | 单个引用文件的字节上限;超限文件跳过(状态 `fail`)而不是阻塞组装。 |
 | `globalPrompt.maxTotalBytes` | 1048576 | 单个段全部引用文件的合计字节预算。 |
 | `autoResume.concurrency` | 3 | 启动恢复的最大在途 resume 数。 |
-| `promptDedup.enabled` | true | 三段(身份/全局/工作区)系统提示词跨段行级去重开关(默认开启,仅显式设为 false 时禁用)。开启时,三段中出现过的**完全相同的非空原行**只保留"先出现"一份(全局 seen 贯穿三段),后出现段的重复行被去掉;**空行永远保留**(它是 markdown 的段落/列表分隔)。任何段独有内容一律保留。不解析 `{{name}}` 占位符、不破坏 markdown、不设 complete,绝不动 harness 自带段。 |
+| `promptDedup.enabled` | true | 四段(身份/全局/组/工作区)系统提示词跨段行级去重开关(默认开启,仅显式设为 false 时禁用)。开启时,四段中出现过的**完全相同的非空原行**只保留"先出现"一份(全局 seen 贯穿四段),后出现段的重复行被去掉;**空行永远保留**(它是 markdown 的段落/列表分隔)。任何段独有内容一律保留。不解析 `{{name}}` 占位符、不破坏 markdown、不设 complete,绝不动 harness 自带段。 |
 | `identity.default` / `identity.sessions` | 空 | **用户数据**(volatile):默认身份与每会话身份。设置页「会话身份」写入;也可直接写 profile patch。 |
 | `globalPrompt.enabled` / `.content` / `.files` | off / 空 | **用户数据**(volatile):全局提示词开关、正文、引用文件列表。 |
 | `workspacePrompt.workspaces` / `.removed` | 空 | **用户数据**(volatile):按工作区提示词与「已移除路径」。活跃工作区同步会把新出现的路径补进 `workspaces`(经 `ctx.get('settings').update`),`removed` 里的路径不会被补回。 |
@@ -251,13 +259,13 @@ node scripts/dsh-log-ui.drift.mjs --harness <deepseek-harness 路径>          #
 
 #### 模型看到的内容
 
-每次组装贡献三个段,顺序:`session-identity`(order 40)→ `global-prompt`(order 50)→ `workspace-prompt`(order 60),位于部署 persona 之后、工具引导(100–199)之前。身份段在组装时按 agent(`AssembleContext.agent`)从 `session-identity` 设置解析,subagent(`origin`/`delegationDepth`)跳过。工作区段为 `cwd` 前缀匹配到配置工作区(取路径最深/最具体且启用者)的会话注入该工作区提示词,否则为空。
+每次组装贡献四个段,顺序:`session-identity`(order 40)→ `global-prompt`(order 50)→ `group-prompt`(order 55)→ `workspace-prompt`(order 60),位于部署 persona 之后、工具引导(100–199)之前。身份段在组装时按 agent(`AssembleContext.agent`)从 `session-identity` 设置解析,subagent(`origin`/`delegationDepth`)跳过。工作区段为 `cwd` 前缀匹配到配置工作区(取路径最深/最具体且启用者)的会话注入该工作区提示词,否则为空。组段在**自身会话 id** 命中某个已启用组的 `sessions` 列表时才注入(按会话 id 而非目录匹配,故一个组可跨工作区);多个命中组按组键序拼接、块间一个空行;无命中注入空。
 
 全局段与工作区段都会在提示词文本后追加其**引用文件内容**:每次组装读取 `files`(UTF-8,按 mtime/大小缓存),按原文拼接(段声明 `interpolate: false`,内容不被改写)。无法读取或超出字节预算的文件会**跳过**(其内容不注入),但其读取状态被记录供 UI 显示。空段在渲染时删除。
 
 #### Token 影响
 
-启用时三个段的文本随每次请求重复。全局提示词作用于所有会话;身份文本仅作用于能解析到它的会话(自身记录或默认);工作区文本仅作用于 `cwd` 前缀匹配到已启用且已配置工作区(取最具体)的会话。引用文件的完整内容会加入实际提示词,因此消耗额外 token——大引用文件会显著增加每次请求的 token 成本。身份文本上限 8000 字符(token 守卫)。
+启用时四个段的文本随每次请求重复。全局提示词作用于所有会话;身份文本仅作用于能解析到它的会话(自身记录或默认);工作区文本仅作用于 `cwd` 前缀匹配到已启用且已配置工作区(取最具体)的会话;组文本仅作用于自身会话 id 列在某个已启用组里的会话(多个命中组按组键序拼接)。引用文件的完整内容会加入实际提示词,因此消耗额外 token——大引用文件会显著增加每次请求的 token 成本。身份文本上限 8000 字符(token 守卫)。
 
 #### KV Cache 影响
 

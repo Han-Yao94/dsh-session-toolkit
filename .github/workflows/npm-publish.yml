@@ -187,6 +187,28 @@ jobs:
           node-version: 20
       - run: node scripts/workspace-prompt.guard.assert.mjs --selftest
 
+  group-prompt-contract:
+    # 组提示词契约（`lib/global-prompt.js` 第三段 + `lib/prompt-dedup.js` 名字表 + 状态路由 shape）：
+    # 八格判据（enabled 判定 / 成员判定 / 键序拼接与 '\n\n' / interpolate:false 字面保真 /
+    # 路由 sessions 形状 / 缓存命名空间不互相剔除 / TARGET_NAMES 含组段 / 组命名空间剔除不越界）。
+    # `--selftest` 必须带：只跑真实对照就漏掉了「门自己还能不能红」这半边，且本门**九份变异各点名
+    # 一条判据**；九格里有两条曾长期是**空断言**（变异下读数与基线逐项相同），是靠自证才发现并修掉的
+    # —— 没有 `--selftest` 这两条会一直假装在守。
+    #
+    # 为什么本门**可以**挂 CI（判据同 `:119 request-guard` 那段：红是否可被合理驳回）：
+    # ① 零外部输入 —— 只读本仓库 `lib/global-prompt.js` / `lib/prompt-dedup.js`，其余全在 os.tmpdir()
+    #    的副本里跑（含 request-guard 桩），不读已装 profile、不读 harness checkout、不打任何端口；
+    # ② 属**契约门** —— 它的红只有一个动作（修 `lib/` 或修门），没有"这次可以放过"的合法理由。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/group-prompt.contract.assert.mjs --selftest
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
@@ -200,7 +222,7 @@ jobs:
     #     （对照：`:46 dependency-skew.measure.mjs --selftest` 与 `:47 dsh-log-ui.drift.mjs --selftest`
     #      确实在 `selftest` job 里跑 —— 它们是**不需要外部 checkout**的自证步骤；本条之所以例外在
     #      「不进任何步骤」，理由是上面的"可被合理驳回"，与它们能否在 CI 跑无关。）
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract]
     # ⚠️ `request-guard` **加入 needs**（D 的判断；按上面的分界判据，它是契约门而非探测器，故不冲突）：
     #   判据同上：**红是否可被合理驳回**。
     #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），

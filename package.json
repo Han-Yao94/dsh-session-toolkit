@@ -34,7 +34,9 @@
     "assert:clamp": "node scripts/clamp-call.assert.mjs",
     "assert:clamp:selftest": "node scripts/clamp-call.assert.mjs --selftest",
     "assert:workspace-prompt": "node scripts/workspace-prompt.guard.assert.mjs",
-    "assert:workspace-prompt:selftest": "node scripts/workspace-prompt.guard.assert.mjs --selftest"
+    "assert:workspace-prompt:selftest": "node scripts/workspace-prompt.guard.assert.mjs --selftest",
+    "assert:group-prompt": "node scripts/group-prompt.contract.assert.mjs",
+    "assert:group-prompt:selftest": "node scripts/group-prompt.contract.assert.mjs --selftest"
   },
   "main": "lib/index.js",
   "exports": {

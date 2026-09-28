@@ -15,6 +15,8 @@ window.__ModuleLoader__.load({
     var ENTRY_ID = 'session-toolkit';
     var SETTINGS_SERVICE = 'configForms';
     var STATE_URL = '/api/session-toolkit/state';
+    // 组提示词的文件读取状态 scopeKey（与 host 半 lib/global-prompt.js 的 'group:' + 组名 对齐）
+    var GROUP_FILE_SCOPE = 'group:';
     var UI_FALLBACK = {
       identityCharLimit: 4000,
       copyFeedbackMs: 1600,
@@ -67,7 +69,7 @@ window.__ModuleLoader__.load({
     // 这两项是 host 运行时状态而非用户配置，故不走 settings 表单。
     var stateStore = (function () {
       var POLL_MS = 2000;
-      var snapshot = { status: 'loading', value: { active: [], fileStatus: { byScope: {} } } };
+      var snapshot = { status: 'loading', value: { active: [], fileStatus: { byScope: {} }, sessions: [] } };
       var listeners = [];
       var cancelTimer = null;
       var inFlight = false;
@@ -89,6 +91,7 @@ window.__ModuleLoader__.load({
             value: {
               active: body && Array.isArray(body.active) ? body.active : [],
               fileStatus: (body && body.fileStatus && typeof body.fileStatus === 'object') ? body.fileStatus : { byScope: {} },
+              sessions: body && Array.isArray(body.sessions) ? body.sessions : [],
             },
           };
         }).catch(function (e) {
@@ -123,15 +126,16 @@ window.__ModuleLoader__.load({
       };
     })();
 
-    // 运行时投影的两个只读读面，形状对齐被替换掉的 settings 命名空间（value.active / value.byScope）。
+    // 运行时投影的只读读面，形状对齐被替换掉的 settings 命名空间（value.active / value.byScope）。
+    // sessions（路由的 live 顶层会话列表）只服务组提示词的会话 picker。
     function runtimeScope(ctx, field) {
       return {
         getSnapshot: function () {
           var snap = stateStore.getSnapshot();
-          return {
-            status: snap.status,
-            value: field === 'fileStatus' ? { byScope: snap.value.fileStatus.byScope } : { active: snap.value.active },
-          };
+          var value = field === 'fileStatus'
+            ? { byScope: snap.value.fileStatus.byScope }
+            : (field === 'sessions' ? { sessions: snap.value.sessions } : { active: snap.value.active });
+          return { status: snap.status, value: value };
         },
         subscribe: function (listener) { return stateStore.subscribe(ctx, listener); },
       };
@@ -1172,8 +1176,8 @@ collect('identity', apply);
     title: '全局提示词',
     tabGlobal: '全局',
     tabWorkspace: '按工作区',
-    desc: '为所有会话注入一段全局提示词，并为指定工作区注入专属提示词。',
-    scopeOrder: '按 会话身份 → 全局 → 工作区 顺序拼接。',
+    desc: '为所有会话注入一段全局提示词，为指定工作区注入专属提示词，并按会话成员注入组提示词。',
+    scopeOrder: '按 会话身份 → 全局 → 工作区 → 组 顺序拼接。',
     badgeOn: '已启用',
     badgeOff: '已关闭',
     enableLabel: '启用全局提示词',
@@ -1203,6 +1207,30 @@ collect('identity', apply);
     inactive: '未活跃',
     remove: '移除',
     sessionUnit: '个会话',
+    // —— 组提示词标签页（第三个标签页）——
+    tabGroup: '组提示词',
+    groupEnableHint: '开启后，只有本组选中的会话会注入此提示词。',
+    groupName: '组名',
+    groupNamePlaceholder: '输入组名',
+    groupNewPlaceholder: '新组名',
+    groupAdd: '新建组',
+    groupRename: '改名',
+    groupNameTaken: '组名已存在',
+    groupNameEmpty: '组名不能为空',
+    groupRemove: '删除组',
+    groupsLabel: '组',
+    emptyGroups: '还没有组',
+    emptyGroupHint: '新建一个组，选中要注入的会话，再填写提示词内容。',
+    groupMembersLabel: '生效会话',
+    groupNoMembers: '未选择会话',
+    groupMembersUnit: '个会话',
+    sessionsLabel: '选择会话',
+    sessionOffline: '未在线',
+    sessionOfflineHint: '该会话当前不在线；配置会保留，它上线后仍生效。',
+    sessionIdLabel: '会话 ID',
+    titleMissing: '未命名',
+    noLiveSessions: '当前没有活跃会话',
+    enabledGroups: '已启用',
   };
 
   var en = {
@@ -1210,8 +1238,8 @@ collect('identity', apply);
     title: 'Global Prompt',
     tabGlobal: 'Global',
     tabWorkspace: 'Per workspace',
-    desc: 'Inject a global prompt into every conversation and per-workspace prompts for specific workspaces.',
-    scopeOrder: 'Assembled in order: session identity → global → workspace.',
+    desc: 'Inject a global prompt into every conversation, per-workspace prompts for specific workspaces, and group prompts by session membership.',
+    scopeOrder: 'Assembled in order: session identity → global → workspace → group.',
     badgeOn: 'Enabled',
     badgeOff: 'Disabled',
     enableLabel: 'Enable global prompt',
@@ -1241,6 +1269,30 @@ collect('identity', apply);
     inactive: 'Inactive',
     remove: 'Remove',
     sessionUnit: ' sessions',
+    // —— Group prompt tab (the third tab) ——
+    tabGroup: 'Group prompt',
+    groupEnableHint: 'When on, only this group’s selected conversations get the prompt.',
+    groupName: 'Group name',
+    groupNamePlaceholder: 'Enter group name',
+    groupNewPlaceholder: 'New group name',
+    groupAdd: 'New group',
+    groupRename: 'Rename',
+    groupNameTaken: 'Group name already exists',
+    groupNameEmpty: 'Group name cannot be empty',
+    groupRemove: 'Delete group',
+    groupsLabel: 'Groups',
+    emptyGroups: 'No groups yet',
+    emptyGroupHint: 'Create a group, pick its conversations, then write the prompt.',
+    groupMembersLabel: 'Applies to',
+    groupNoMembers: 'No conversation selected',
+    groupMembersUnit: ' conversations',
+    sessionsLabel: 'Select conversations',
+    sessionOffline: 'not online',
+    sessionOfflineHint: 'This conversation is not online now; the setting is kept and applies once it returns.',
+    sessionIdLabel: 'Session ID',
+    titleMissing: 'Untitled',
+    noLiveSessions: 'No active conversations',
+    enabledGroups: 'Enabled',
   };
 
   // 字符上限来自 session-toolkit-ui（见 factory 顶部 uiCfg），渲染时读取。
@@ -1285,9 +1337,13 @@ collect('identity', apply);
     var t = props.t;
     var tab = props.tab;
     var onTab = props.onTab;
+    function item(id, label) {
+      return React.createElement('button', { type: 'button', role: 'tab', 'aria-selected': tab === id, className: 'dsw-tab' + (tab === id ? ' active' : ''), onClick: function () { onTab(id); } }, label);
+    }
     return React.createElement('div', { className: 'dsw-tabs', role: 'tablist' },
-      React.createElement('button', { type: 'button', role: 'tab', 'aria-selected': tab === 'global', className: 'dsw-tab' + (tab === 'global' ? ' active' : ''), onClick: function () { onTab('global'); } }, t('tabGlobal')),
-      React.createElement('button', { type: 'button', role: 'tab', 'aria-selected': tab === 'workspace', className: 'dsw-tab' + (tab === 'workspace' ? ' active' : ''), onClick: function () { onTab('workspace'); } }, t('tabWorkspace')));
+      item('global', t('tabGlobal')),
+      item('workspace', t('tabWorkspace')),
+      item('group', t('tabGroup')));
   }
 
   function WorkspaceRow(props) {
@@ -1515,6 +1571,8 @@ collect('identity', apply);
     var t = props.t;
     var scope = props.scope;
     var wsScope = props.wsScope;
+    var gpScope = props.gpScope;
+    var sessionsScope = props.sessionsScope;
     var activeScope = props.activeScope;
     var fsStatusScope = props.fsStatusScope;
     var ctx = props.ctx;
@@ -1545,9 +1603,11 @@ collect('identity', apply);
       var bump = function () { stateTick[1](function (x) { return x + 1; }); };
       var offActive = activeScope ? activeScope.subscribe(bump) : null;
       var offFiles = fsStatusScope ? fsStatusScope.subscribe(bump) : null;
+      var offSessions = sessionsScope ? sessionsScope.subscribe(bump) : null;
       return function () {
         if (offActive) offActive();
         if (offFiles) offFiles();
+        if (offSessions) offSessions();
       };
     }, []);
     var fileSnap = fsStatusScope ? fsStatusScope.getSnapshot() : null;
@@ -1581,6 +1641,16 @@ collect('identity', apply);
       };
     }, []);
     var gStatus = gSnap ? gSnap.status : 'loading';
+    function groupEnabledCount() {
+      if (!gpScope) return 0;
+      var gs = gpScope.getSnapshot();
+      var gv = (gs && gs.value && typeof gs.value === 'object') ? gs.value : {};
+      var gg = (gv.groups && typeof gv.groups === 'object') ? gv.groups : {};
+      var ks = Object.keys(gg);
+      var n = 0;
+      for (var qi = 0; qi < ks.length; qi++) { if (gg[ks[qi]] && gg[ks[qi]].enabled === true) n++; }
+      return n;
+    }
 
     useEffect(function () {
       return scope.subscribe(function () {
@@ -1720,7 +1790,7 @@ collect('identity', apply);
             React.createElement('div', { className: 'dsw-title-group' },
               React.createElement(primitives.IconGlobeOutlineRegular, { size: 18 }),
               React.createElement('h1', { className: 'dsw-title' }, t('title'))),
-            React.createElement(primitives.Pill, { active: gEnabled, className: 'dsw-badge' + (gEnabled ? ' dsw-badge-on' : ' dsw-badge-off') }, gEnabled ? t('badgeOn') : t('badgeOff'))),
+            React.createElement(primitives.Pill, { active: tab === 'group' ? groupEnabledCount() > 0 : gEnabled, className: 'dsw-badge' + ((tab === 'group' ? groupEnabledCount() > 0 : gEnabled) ? ' dsw-badge-on' : ' dsw-badge-off') }, tab === 'group' ? (String(groupEnabledCount()) + ' ' + t('enabledGroups')) : (gEnabled ? t('badgeOn') : t('badgeOff'))))),
           React.createElement('p', { className: 'dsw-desc' }, t('desc'))),
 
         React.createElement('div', { className: 'dsw-scope-note' }, t('scopeOrder')),
@@ -1755,7 +1825,9 @@ collect('identity', apply);
                   }).catch(function (e) { console.warn('[dsh-global-prompt] reset settings failed', e); });
                 } }, t('reset'))),
               gToast ? React.createElement(Toast, { toast: gToast, t: t }) : null)
-          : React.createElement('div', { className: 'dsw-workspace' },
+          : (tab === 'group'
+            ? React.createElement(GroupsTab, { t: t, ctx: ctx, gpScope: gpScope, sessionsScope: sessionsScope, fsStatusScope: fsStatusScope })
+            : React.createElement('div', { className: 'dsw-workspace' },
               rows.length === 0
                 ? React.createElement('div', { className: 'dsw-empty' },
                     React.createElement(primitives.IconArchiveOutlineRegular, { size: 20 }),
@@ -1766,6 +1838,350 @@ collect('identity', apply);
                   })))));
   }
 
+  // ---- 组提示词：会话 picker（只列路由返回的 live 会话；已存但未在线的 id 仍可见可移除）----
+  function SessionPicker(props) {
+    var t = props.t;
+    var live = Array.isArray(props.live) ? props.live : [];
+    var selected = Array.isArray(props.selected) ? props.selected : [];
+    var onChange = props.onChange;
+
+    function toggle(id) {
+      var next = selected.slice();
+      var idx = next.indexOf(id);
+      if (idx === -1) next.push(id); else next.splice(idx, 1);
+      onChange(next);
+    }
+    // 选中但当前不在线的 id：路由没列它，配置里还在 ⇒ 单独显示并标注，允许移除。
+    var liveIds = {};
+    for (var li = 0; li < live.length; li++) liveIds[live[li].id] = true;
+    var offline = [];
+    for (var si = 0; si < selected.length; si++) {
+      if (!liveIds[selected[si]]) offline.push(selected[si]);
+    }
+    var rows = live.map(function (s) {
+      var id = String(s.id);
+      var title = (typeof s.title === 'string' && s.title !== '') ? s.title : t('titleMissing');
+      var cwd = (typeof s.cwd === 'string' && s.cwd !== '') ? s.cwd : '';
+      var meta = (cwd ? cwd + ' · ' : '') + id;
+      var checked = selected.indexOf(id) !== -1;
+      return React.createElement('label', { key: id, className: 'dsw-session-row', title: t('sessionIdLabel') + ': ' + id + (cwd ? '\n' + cwd : '') },
+        React.createElement('input', { type: 'checkbox', className: 'dsw-session-check', checked: checked, onChange: function () { toggle(id); } }),
+        React.createElement('span', { className: 'dsw-session-text' },
+          React.createElement('span', { className: 'dsw-session-title' }, title),
+          React.createElement('span', { className: 'dsw-session-meta' }, meta)));
+    });
+    if (rows.length === 0 && offline.length === 0) {
+      rows = [React.createElement('div', { key: '__none', className: 'dsw-session-meta' }, t('noLiveSessions'))];
+    }
+    var offRows = offline.map(function (id) {
+      return React.createElement('div', { key: 'off-' + id, className: 'dsw-session-row', title: t('sessionOfflineHint') + '\n' + t('sessionIdLabel') + ': ' + id },
+        React.createElement('span', { className: 'dsw-session-text' },
+          React.createElement('span', { className: 'dsw-session-title' }, id),
+          React.createElement('span', { className: 'dsw-session-meta' }, t('sessionOffline'))),
+        React.createElement('button', { type: 'button', className: 'dsw-file-remove', onClick: function () { toggle(id); }, 'aria-label': t('remove') }, '\u00d7'));
+    });
+    return React.createElement('div', { className: 'dsw-sessions' },
+      React.createElement('div', { className: 'dsw-files-label' }, t('sessionsLabel')),
+      React.createElement('div', { className: 'dsw-files-list' }, rows),
+      offRows.length > 0 ? React.createElement('div', { className: 'dsw-files-list' }, offRows) : null);
+  }
+
+  // ---- 组提示词：一行 = 一个组（组名 = config 字典键）----
+  function GroupRow(props) {
+    var t = props.t;
+    var ctx = props.ctx;
+    var gpScope = props.gpScope;
+    var groupKey = props.groupKey;
+    var record = props.record;
+    var liveSessions = props.liveSessions;
+    var fsStatusByScope = props.fsStatusByScope;
+    var renaming = props.renaming;
+    var open = props.open;
+    var onToggleOpen = props.onToggleOpen;
+    var onRenamed = props.onRenamed;
+    var onRemove = props.onRemove;
+    var onRenamingChange = props.onRenamingChange;
+    var useState = React.useState;
+    var useEffect = React.useEffect;
+    var useRef = React.useRef;
+
+    var initEnabled = record.enabled === true;
+    var initContent = typeof record.content === 'string' ? record.content : '';
+    var initFiles = Array.isArray(record.files) ? record.files : [];
+    var initSessions = Array.isArray(record.sessions) ? record.sessions : [];
+
+    var enabledState = useState(initEnabled);
+    var enabled = enabledState[0], setEnabled = enabledState[1];
+    var contentState = useState(initContent);
+    var content = contentState[0], setContent = contentState[1];
+    var savingState = useState(false);
+    var saving = savingState[0], setSaving = savingState[1];
+    var toastState = useState(null);
+    var toast = toastState[0], setToast = toastState[1];
+    var nameState = useState(groupKey);
+    var nameDraft = nameState[0], setNameDraft = nameState[1];
+    var nameErrState = useState(null);
+    var nameErr = nameErrState[0], setNameErr = nameErrState[1];
+    var lastSavedRef = useRef({ enabled: initEnabled, content: initContent });
+
+    // 组名可能被外部改名（另一处写入）：只在本地没在改名时跟随。
+    useEffect(function () { if (!renaming) setNameDraft(groupKey); }, [groupKey, renaming]);
+    useEffect(function () {
+      return gpScope.subscribe(function () {
+        var s = gpScope.getSnapshot();
+        var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+        var gs = (v.groups && typeof v.groups === 'object') ? v.groups : {};
+        var r = (gs[groupKey] && typeof gs[groupKey] === 'object') ? gs[groupKey] : {};
+        var e = r.enabled === true;
+        var c = typeof r.content === 'string' ? r.content : '';
+        var prevSaved = lastSavedRef.current;
+        lastSavedRef.current = { enabled: e, content: c };
+        setEnabled(function (prev) { return prev === prevSaved.enabled ? e : prev; });
+        setContent(function (prev) { return prev === prevSaved.content ? c : prev; });
+      });
+    }, [groupKey]);
+    useEffect(function () {
+      if (!toast) return;
+      return ctx.timeout(function () { setToast(null); }, 2000);
+    }, [toast]);
+
+    // 组字典的读改写：每次都从最新快照复制一份再写（硬约束：不原地改快照对象）。
+    function readGroups() {
+      var s = gpScope.getSnapshot();
+      var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+      return (v.groups && typeof v.groups === 'object') ? { ...v.groups } : {};
+    }
+    function writeGroups(next, msg) {
+      return Promise.resolve(gpScope.set('groups', next)).catch(function (e) {
+        console.warn('[dsh-global-prompt] group write failed', e);
+        if (msg) setToast({ type: 'err', text: t('saveError') });
+      });
+    }
+    function subRecord(key, mutator) {
+      var gs = readGroups();
+      var rec = (gs[key] && typeof gs[key] === 'object') ? { ...gs[key] } : { enabled: false, content: '', files: [], sessions: [] };
+      mutator(rec);
+      gs[key] = rec;
+      return gs;
+    }
+    function onFilesChange(newFiles) { writeGroups(subRecord(groupKey, function (r) { r.files = newFiles; })); }
+    function onSessionsChange(nextSessions) { writeGroups(subRecord(groupKey, function (r) { r.sessions = nextSessions; })); }
+
+    function save() {
+      if (saving) return;
+      setSaving(true);
+      var next = { enabled: enabled, content: content };
+      var gs = subRecord(groupKey, function (r) { r.enabled = next.enabled; r.content = next.content; });
+      Promise.resolve(gpScope.set('groups', gs)).then(function () {
+        var s2 = gpScope.getSnapshot();
+        var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
+        var gs2 = (v2.groups && typeof v2.groups === 'object') ? v2.groups : {};
+        var cur = gs2[groupKey];
+        var ok = cur && cur.enabled === next.enabled && (typeof cur.content === 'string' ? cur.content : '') === next.content;
+        if (ok) {
+          lastSavedRef.current = next;
+          setToast({ type: 'ok', text: t('savedToast') });
+        } else {
+          setToast({ type: 'err', text: t('saveError') + ': ' + t('conflict') });
+        }
+      }).catch(function () {
+        setToast({ type: 'err', text: t('saveError') });
+      }).then(function () { setSaving(false); });
+    }
+    function saveEnabled(next) {
+      var gs = subRecord(groupKey, function (r) { r.enabled = next; });
+      Promise.resolve(gpScope.set('groups', gs)).then(function () {
+        var s2 = gpScope.getSnapshot();
+        var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
+        var gs2 = (v2.groups && typeof v2.groups === 'object') ? v2.groups : {};
+        var cur = gs2[groupKey];
+        if (cur && cur.enabled === next) {
+          setEnabled(next);
+          lastSavedRef.current = { enabled: next, content: lastSavedRef.current.content };
+        } else {
+          setToast({ type: 'err', text: t('saveError') + ': ' + t('conflict') });
+        }
+      }).catch(function () { setToast({ type: 'err', text: t('saveError') }); });
+    }
+    function commitRename() {
+      var name = nameDraft.trim();
+      if (name === groupKey) { setNameErr(null); onRenamingChange(false); return; }
+      if (name === '') { setNameErr(t('groupNameEmpty')); return; }
+      var gs = readGroups();
+      if (Object.prototype.hasOwnProperty.call(gs, name)) { setNameErr(t('groupNameTaken')); return; }
+      var rec = (gs[groupKey] && typeof gs[groupKey] === 'object') ? { ...gs[groupKey] } : { enabled: false, content: '', files: [], sessions: [] };
+      delete gs[groupKey];
+      gs[name] = rec;
+      setNameErr(null);
+      writeGroups(gs).then(function () { onRenamed(name); onRenamingChange(false); });
+    }
+    function onKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); save(); }
+    }
+
+    var count = content.length;
+    var countClass = 'dsw-count' + (count > charLimit() ? ' dsw-count-error' : (count > charWarnAt() ? ' dsw-count-warn' : ''));
+    var disabled = !enabled;
+    var dirty = enabled !== lastSavedRef.current.enabled || content !== lastSavedRef.current.content;
+    var members = Array.isArray(record.sessions) ? record.sessions : [];
+    var rowFiles = Array.isArray(record.files) ? record.files : [];
+    var scopeKey = GROUP_FILE_SCOPE + groupKey;
+    var rowFileStatus = Array.isArray(fsStatusByScope[scopeKey]) ? fsStatusByScope[scopeKey] : [];
+    var memberText = members.length === 0 ? t('groupNoMembers') : (String(members.length) + ' ' + t('groupMembersUnit'));
+    var areaId = 'dsw-group-area-' + groupKey;
+
+    var collapsed = React.createElement('span', { className: 'dsw-group-members' }, memberText);
+    var headExtra = renaming
+      ? React.createElement('span', { className: 'dsw-group-add' },
+          React.createElement('input', { className: 'dsw-group-name-input', value: nameDraft, placeholder: t('groupNamePlaceholder'), onChange: function (e) { setNameDraft(e.target.value); setNameErr(null); }, onKeyDown: function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+            if (e.key === 'Escape') { e.preventDefault(); setNameDraft(groupKey); setNameErr(null); onRenamingChange(false); }
+          } }),
+          React.createElement(primitives.Button, { variant: 'primary', size: 'sm', onClick: commitRename }, t('save')))
+      : React.createElement('span', { className: 'dsw-group-add' },
+          React.createElement('span', { className: 'dsw-group-tag ' + (enabled ? 'on' : 'off') }, enabled ? t('badgeOn') : t('badgeOff')));
+
+    return React.createElement(primitives.DisclosureRow, {
+      icon: React.createElement(primitives.IconFolderOpenOutlineRegular, { size: 16 }),
+      title: groupKey,
+      open: open,
+      expandable: true,
+      keepContentWhenOpen: true,
+      collapsedContent: collapsed,
+      onToggle: function () { onToggleOpen(!open); },
+      expandOnRowClick: true,
+    },
+      React.createElement('div', { className: 'dsw-group-body', onKeyDown: onKeyDown },
+        React.createElement('div', { className: 'dsw-group-name' },
+          React.createElement('div', { className: 'dsw-files-label' }, t('groupName')),
+          headExtra),
+        nameErr ? React.createElement('div', { className: 'dsw-removed-hint' }, nameErr) : null,
+        React.createElement(SwitchRow, { t: t, enabled: enabled, onToggle: function () { saveEnabled(!enabled); }, label: t('enableLabel'), hint: t('groupEnableHint') }),
+        React.createElement('div', { className: 'dsw-content' + (disabled ? ' dsw-disabled' : '') },
+          React.createElement('div', { className: 'dsw-label-row' },
+            React.createElement('label', { className: 'dsw-label', htmlFor: areaId }, t('contentLabel')),
+            React.createElement('span', { className: countClass }, String(count) + ' ' + t('charUnit'))),
+          React.createElement('textarea', { id: areaId, className: 'dsw-area', value: content, disabled: disabled, spellCheck: false, placeholder: t('placeholder'), onChange: function (e) { setContent(e.target.value); } })),
+        React.createElement(FileRefsPanel, { t: t, files: rowFiles, onFilesChange: onFilesChange, statuses: rowFileStatus }),
+        React.createElement('div', null,
+          React.createElement('div', { className: 'dsw-files-label' }, t('groupMembersLabel')),
+          React.createElement(SessionPicker, { t: t, live: liveSessions, selected: members, onChange: onSessionsChange })),
+        React.createElement('div', { className: 'dsw-actions' },
+          dirty ? React.createElement('span', { className: 'dsw-unsaved', role: 'status' }, t('unsaved')) : null,
+          React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', onClick: function () { onRenamingChange(true); } }, t('groupRename')),
+          React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', onClick: function () { setEnabled(false); setContent(''); } }, t('reset')),
+          React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', onClick: function () { onRemove(groupKey); } }, t('groupRemove')),
+          React.createElement(primitives.Button, { variant: 'primary', size: 'sm', disabled: saving || disabled || !dirty, onClick: save }, saving ? t('saving') : t('save'))),
+        toast ? React.createElement(Toast, { toast: toast, t: t }) : null));
+  }
+
+  // ---- 组提示词标签页 ----
+  function GroupsTab(props) {
+    var t = props.t;
+    var ctx = props.ctx;
+    var gpScope = props.gpScope;
+    var sessionsScope = props.sessionsScope;
+    var fsStatusScope = props.fsStatusScope;
+    var useState = React.useState;
+    var useEffect = React.useEffect;
+
+    var addState = useState('');
+    var addName = addState[0], setAddName = addState[1];
+    var addErrState = useState(null);
+    var addErr = addErrState[0], setAddErr = addErrState[1];
+    var rnState = useState(null);
+    var renamingKey = rnState[0], setRenamingKey = rnState[1];
+    var openMapState = useState({});
+    var openMap = openMapState[0], setOpenMap = openMapState[1];
+    var tick = useState(0);
+
+    // 组文件读取状态 + live 会话列表都来自同一个状态路由 ⇒ 订阅一次即可双触发。
+    useEffect(function () {
+      var bump = function () { tick[1](function (x) { return x + 1; }); };
+      var offFiles = fsStatusScope ? fsStatusScope.subscribe(bump) : null;
+      var offSessions = sessionsScope ? sessionsScope.subscribe(bump) : null;
+      return function () { if (offFiles) offFiles(); if (offSessions) offSessions(); };
+    }, []);
+
+    var snap = gpScope.getSnapshot();
+    var val = (snap && snap.value && typeof snap.value === 'object') ? snap.value : {};
+    var groups = (val.groups && typeof val.groups === 'object') ? val.groups : {};
+    var keys = Object.keys(groups);
+    var status = snap ? snap.status : 'loading';
+
+    var fsSnap = fsStatusScope ? fsStatusScope.getSnapshot() : null;
+    var fsVal = (fsSnap && fsSnap.value && typeof fsSnap.value === 'object') ? fsSnap.value : {};
+    var fsByScope = (fsVal.byScope && typeof fsVal.byScope === 'object') ? fsVal.byScope : {};
+    var seSnap = sessionsScope ? sessionsScope.getSnapshot() : null;
+    var seVal = (seSnap && seSnap.value && typeof seSnap.value === 'object') ? seSnap.value : {};
+    // sessions 字段缺席（host 尚未升级）时降级为空列表：picker 只显示已存 id，不报错。
+    var liveSessions = Array.isArray(seVal.sessions) ? seVal.sessions : [];
+
+    function readGroups() {
+      var s = gpScope.getSnapshot();
+      var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
+      return (v.groups && typeof v.groups === 'object') ? { ...v.groups } : {};
+    }
+    function writeGroups(next) {
+      return Promise.resolve(gpScope.set('groups', next)).catch(function (e) {
+        console.warn('[dsh-global-prompt] groups write failed', e);
+      });
+    }
+    function addGroup() {
+      var name = addName.trim();
+      if (name === '') { setAddErr(t('groupNameEmpty')); return; }
+      var gs = readGroups();
+      if (Object.prototype.hasOwnProperty.call(gs, name)) { setAddErr(t('groupNameTaken')); return; }
+      gs[name] = { enabled: false, content: '', files: [], sessions: [] };
+      setAddErr(null);
+      setAddName('');
+      writeGroups(gs).then(function () { setOpenMap(function (m) { var n = { ...m }; n[name] = true; return n; }); });
+    }
+    function removeGroup(key) {
+      var gs = readGroups();
+      delete gs[key];
+      writeGroups(gs);
+    }
+    function toggleOpen(key, next) { setOpenMap(function (m) { var n = { ...m }; n[key] = next; return n; }); }
+
+    if (status === 'loading') return React.createElement('div', { className: 'dsw-busy' }, t('loading'));
+    if (status === 'unavailable') return React.createElement('div', { className: 'dsw-busy dsw-busy-err' }, t('unavailable'));
+
+    var enabledCount = 0;
+    for (var ei = 0; ei < keys.length; ei++) { if (groups[keys[ei]] && groups[keys[ei]].enabled === true) enabledCount++; }
+
+    var head = React.createElement('div', { className: 'dsw-groups-head' },
+      React.createElement('div', { className: 'dsw-group-add' },
+        React.createElement('input', { className: 'dsw-file-input', value: addName, placeholder: t('groupNewPlaceholder'), onChange: function (e) { setAddName(e.target.value); setAddErr(null); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } } }),
+        React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', disabled: addName.trim() === '', onClick: addGroup }, t('groupAdd'))),
+      React.createElement('span', { className: 'dsw-groups-count' }, String(keys.length) + ' ' + t('groupsLabel') + ' · ' + String(enabledCount) + ' ' + t('enabledGroups')));
+
+    if (keys.length === 0) {
+      return React.createElement('div', { className: 'dsw-groups' }, head,
+        addErr ? React.createElement('div', { className: 'dsw-removed-hint' }, addErr) : null,
+        React.createElement('div', { className: 'dsw-empty' },
+          React.createElement(primitives.IconArchiveOutlineRegular, { size: 20 }),
+          React.createElement('div', { className: 'dsw-empty-title' }, t('emptyGroups')),
+          React.createElement('div', { className: 'dsw-empty-hint' }, t('emptyGroupHint'))));
+    }
+
+    return React.createElement('div', { className: 'dsw-groups' }, head,
+      addErr ? React.createElement('div', { className: 'dsw-removed-hint' }, addErr) : null,
+      React.createElement('div', { className: 'dsw-groups-list' }, keys.map(function (key) {
+        var rec = (groups[key] && typeof groups[key] === 'object') ? groups[key] : {};
+        return React.createElement(GroupRow, {
+          key: key + '|' + (rec.enabled === true ? '1' : '0') + '|' + (Array.isArray(rec.files) ? rec.files.length : 0) + '|' + (Array.isArray(rec.sessions) ? rec.sessions.length : 0),
+          t: t, ctx: ctx, gpScope: gpScope, groupKey: key, record: rec,
+          liveSessions: liveSessions, fsStatusByScope: fsByScope,
+          renaming: renamingKey === key,
+          open: openMap[key] === true,
+          onToggleOpen: function (next) { toggleOpen(key, next); },
+          onRenamed: function (nextKey) { setRenamingKey(null); setOpenMap(function (m) { var n = { ...m }; delete n[key]; n[nextKey] = true; return n; }); },
+          onRemove: function (k) { removeGroup(k); },
+          onRenamingChange: function (on) { setRenamingKey(on ? key : null); },
+        });
+      })));
+  }
   function injectCss() {
     if (typeof document === 'undefined') return;
     if (document.getElementById('dsh-global-prompt-css')) return;
@@ -1793,8 +2209,10 @@ collect('identity', apply);
     // 全局/工作区提示词 = 本条目 config 的两段；活跃工作区与引用文件状态 = host 只读状态路由
     var scope = sectionOf(form, ['globalPrompt']);
     var wsScope = sectionOf(form, ['workspacePrompt']);
+    var gpScope = sectionOf(form, ['groupPrompt']);
     var fsStatusScope = runtimeScope(ctx, 'fileStatus');
     var activeScope = runtimeScope(ctx, 'active');
+    var sessionsScope = runtimeScope(ctx, 'sessions');
     slots.inject('settings.section', function () {
       return slots.register({
         name: 'settings.section',
@@ -1803,7 +2221,7 @@ collect('identity', apply);
         label: function () { return t('nav'); },
         locale: NS,
       }, function () {
-        return React.createElement(GlobalPromptPage, { t: t, scope: scope, wsScope: wsScope, activeScope: activeScope, fsStatusScope: fsStatusScope, ctx: ctx });
+        return React.createElement(GlobalPromptPage, { t: t, scope: scope, wsScope: wsScope, gpScope: gpScope, activeScope: activeScope, fsStatusScope: fsStatusScope, sessionsScope: sessionsScope, ctx: ctx });
       });
     });
   }
@@ -1877,6 +2295,27 @@ collect('identity', apply);
     '.dsw-busy-err{color:var(--dsw-error)}',
     '@keyframes dsw-spin{to{transform:rotate(360deg)}}',
     '@keyframes dsw-toast-in{from{opacity:0;transform:translate(-50%,-6px)}to{opacity:1;transform:translate(-50%,0)}}',
+    // —— 组提示词标签页 ——
+    '.dsw-groups{display:flex;flex-direction:column;gap:12px}',
+    '.dsw-groups-head{display:flex;align-items:center;gap:8px}',
+    '.dsw-groups-count{font-size:12px;color:var(--dsw-text-sub);font-variant-numeric:tabular-nums}',
+    '.dsw-group-add{display:flex;gap:8px;flex:1;min-width:0}',
+    '.dsw-groups-list{display:flex;flex-direction:column;gap:8px}',
+    '.dsw-group-body{display:flex;flex-direction:column;gap:14px;padding:4px 0 4px 2px}',
+    '.dsw-group-name{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.dsw-group-name-input{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-bg-card);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:13px}',
+    '.dsw-group-name-input:focus{outline:none;border-color:var(--dsw-alias-border-l2);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-hover-accent)}',
+    '.dsw-group-tag{flex:none;height:20px;line-height:20px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}',
+    '.dsw-group-tag.on{background:var(--dsw-alias-state-success-tertiary);color:var(--dsw-alias-state-success-primary)}',
+    '.dsw-group-tag.off{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
+    '.dsw-sessions{display:flex;flex-direction:column;gap:6px;padding:12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:8px}',
+    '.dsw-session-row{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;transition:background .15s ease}',
+    '.dsw-session-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+    '.dsw-session-check{flex:none;margin:2px 0 0 0}',
+    '.dsw-session-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}',
+    '.dsw-session-title{font-size:13px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.dsw-session-meta{font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.dsw-session-members{font-size:12px;color:var(--dsw-text-sub)}',
     '',
   ].join('\n');
 

@@ -116,7 +116,10 @@ async function runScenario(mod, name) {
   const live = { current: { workspaces: beforeState.workspaces, removed: beforeState.removed } }
   const store = { entries: {} }
   const updates = []
-  let section = null
+  // 收全部注册的 section（不是「最后一个」）——被测文件现在注册三段
+  // （:292 global-prompt · :311 workspace-prompt · :349 group-prompt），
+  // 而本门要断言的是 workspace-prompt 那段：按 name 选，注册顺序无关。
+  const sections = []
 
   const makeRef = (field) => ({ get: () => live.current[field] })
   const settingsStub = {
@@ -135,7 +138,7 @@ async function runScenario(mod, name) {
     effect: (fn) => { fn(); return () => {} },
     on: () => () => {},
     timeout: () => () => {},
-    systemPrompt: { section: (s) => { section = s; return s } }
+    systemPrompt: { section: (s) => { sections.push(s); return s } }
   }
   // 真身契约（lib/index.js:113）：apply 收到 { global, workspace }，每个 schema 字段是带 .get() 的 ref；
   // 被测文件只读 workspace.workspaces 与 workspace.removed（lib/global-prompt.js:203 / :206）。
@@ -158,7 +161,7 @@ async function runScenario(mod, name) {
     const entriesAtP1 = structuredClone(store.entries)
     const at = updates.length
     live.current.removed = []
-    section = null
+    sections.length = 0
     try {
       await mod.apply(ctx, cfg)
     } catch (err) {
@@ -182,8 +185,15 @@ async function runScenario(mod, name) {
     if (!(mergedWs[WS_A] && Array.isArray(mergedWs[WS_A].files) && mergedWs[WS_A].files.length === 1)) fail('files 引用列表被替换成 ' + JSON.stringify(mergedWs[WS_A] ? mergedWs[WS_A].files : undefined))
     if (!(mergedWs[WS_EXTRA] && mergedWs[WS_EXTRA].content === CONTENT_EXTRA)) fail('未点名条目被连带改写')
     if (updatesP1.length !== 0) fail('正文在时不该有任何写回，实测 ' + updatesP1.length + ' 次')
-    if (section && typeof section.text === 'function') {
-      const txt = section.text({ agent: activeAgent })
+    // text() 必须仍被真跑；但要用【本段】的 section ——
+    // 显式按 name 定位（注册顺序无关），找不到则报红（不许静默跳过，否则这条断言会退化成没有检查）
+    const wsSection = sections.find((s) => s && s.name === 'workspace-prompt')
+    if (!wsSection) {
+      fail('没抓到 name === "workspace-prompt" 的 section（门自身装置的定位失效，不是被测对象的问题）：实测注册了 ' + JSON.stringify(sections.map((s) => (s && s.name) || '(无名)')))
+    } else if (typeof wsSection.text !== 'function') {
+      fail('workspace-prompt 段的 text 不是函数（实测 ' + typeof wsSection.text + '）')
+    } else {
+      const txt = wsSection.text({ agent: activeAgent })
       if (typeof txt !== 'string' || !txt.includes(CONTENT_A)) fail('section.text() 里没有用户正文：' + JSON.stringify(txt))
     }
   }
