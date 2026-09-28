@@ -40,7 +40,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -768,90 +768,246 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   }
   out.push('');
 
-  // ---- 第二组：真身端到端（表副本 + 真 git 基线） ----
+  // ---- 第二组：端到端真身（**构造式冻结输入**，裁定 #78②） ----
   //
-  // ⚠ 这里必须挑一个**真的有 diff** 的基线，否则又是同义反复：
-  //   若 baseline 与工作区逐字相同，`git diff` 一个块都没有 ⇒ 陈旧结构上不可能出现。
-  //   故这一组用 baseline=TARGET_BASELINE（默认 HEAD）跑一次「不得凭空报红」，
-  //   再**额外**用 prevBaseline（默认 HEAD~1）跑一次「必须真报红」。
+  // ⚠ 冻结（2026-09-28 裁定 #78②）：本组原先读两处**活件**——
+  //   `readFileSync(join(ROOT,'client/client.js'))`（工作区未提交态）与
+  //   `git diff <rev> -- client/client.js`（逐字节等于「rev ↔ 工作区」）+ 自动往前找有 diff 的祖先。
+  //   后果实测两次：① C 未提交的编辑把「有 diff 的祖先」从 HEAD~3 改判成 HEAD~1（只动表与门 ⇒ 空转）
+  //   ⇒ 自检翻 2 红；② 4cee4b9 落盘、树干净后**仍然** 2 红——那笔 numstat = 1 1，不移动行 ⇒ 前提没了。
+  //   **那是常驻脆弱性，不只是未提交态的副作用。**
   //
-  // ⚠ **不要把基线写死成 HEAD~1**（我踩过，两次同型）：`HEAD~1` 是相对裁判点，一旦有人
-  //   在门前进了一笔纯文档/门自身的提交，`HEAD~1..HEAD` 就**没有**被引文件的改动块 ⇒
-  //   「真有 diff 的基线」这个装置前提**被提交历史换掉了** ⇒ 真身读数退化成「陈旧 0 / PASS」。
-  //   故这里**自动往前找**第一个「被引文件真有改动块」的祖先基线，找不到就报**装置故障**，
-  //   绝不静默退化成同义反复。
-  // 环境变量 CLD_DIFF_BASELINE 可指定一条确定基线（覆盖自动探测）。
-  let prevBaseline = process.env.CLD_DIFF_BASELINE || null;
-  if (!prevBaseline) {
-    for (let d = 1; d <= 8 && !prevBaseline; d += 1) {
-      try {
-        const rev = git(['rev-parse', `HEAD~${d}`]).trim();
-        const n = parseHunks(git(['diff', '--unified=0', '--no-color', '--no-ext-diff', rev, '--', 'client/client.js'])).length;
-        if (n > 0) prevBaseline = `HEAD~${d}`;
-      } catch { break; }
-    }
-  }
-  let prevOk = false;
+  // 现在两处都不再读活件：
+  //   · 基线副本 = **冻结夹具** `scripts/fixtures/client.groups-pre-fix.js` 的逐字节副本；
+  //   · 现盘副本 = 由**脚本内构造**算出（在上述基线第 100 行与第 200 行之后各插 60 行）；
+  //   · hunks 由同一构造算出（**不调 git**）；读数经 `refRoot` 落到临时树，不碰工作区。
+  //   构造式（而非第二份夹具）的理由：判据要的是「**同一条基线行有两个可比行号**」这一**关系**，
+  //   不是某份特定历史文件的字节；构造出的关系确定、可当场自证、且不受任何提交影响。
+  //
+  // ⚠ 仍**必须**挑真有位移的输入，否则又是同义反复。故本组的自证顺序：
+  //   ① 先证明装置存在（基线副本与现盘副本之间确有净位移）；
+  //   ② 再找一条**自证有效**的承载行（基线行与现盘行逐字相同 + mapper 报位移 == 构造量）；
+  //   ③ 最后用一次真实读数（注入后必须判陈旧）撞它。
+  //   任一条不成立 ⇒ 报**装置故障/判据不成立**，绝不静默退化成「陈旧 0 / PASS」。
+  //
+  // ⚠ 零外部输入：本组不读工作区、不读 git 历史、不读环境变量（`CLD_DIFF_BASELINE` 已废弃）。
+  // 负向对照（证明本组能报红）两种用法：
+  //   ① `CLD_2ND_ROOTS=builtin` —— **以内置方式**造出「位移不存在」的两份坏副本（推荐：不依外部文件，
+  //      读者不必相信任何外部目录里放的是什么东西；坏副本由脚本按已入库夹具现算）；
+  //   ② `CLD_2ND_ROOTS=<基线目录>:<现盘目录>` —— 指向外部两份坏副本（早期形态，保留）。
+  //   两种用法下本组都**必须**报红；报绿即负向对照失败。
+  const SECOND_BROKEN_DIRS = process.env.CLD_2ND_ROOTS && process.env.CLD_2ND_ROOTS !== 'builtin' ? process.env.CLD_2ND_ROOTS : null;
+  const SECOND_BROKEN_BUILTIN = process.env.CLD_2ND_ROOTS === 'builtin';
+  const SECOND_BROKEN = !!(SECOND_BROKEN_BUILTIN || SECOND_BROKEN_DIRS);
+  const secondChecks = [];
+  let secondOk = true;
+  let secondDeviceErr = null;
+  const secondFixtRel = 'scripts/fixtures/client.groups-pre-fix.js';
+  const secondPreAbs = join(ROOT, secondFixtRel);
+  let secondRestore = null;   // 写回构造件前的原字节；finally 里必须还原（放这里是因为 finally 看不见 try 内的 let）
+  let secondBaseline = null;  // 基线修订名（'HEAD'）；其解析出的对象 id 与内容 sha256 都在本组里钉死
+  let secondExtra = null;   // 只有「见证行不存在」这类前提下失效才填，用来分辨「装置前提不成立」与「判据不成立」
   casesRun += 1;
   try {
-    if (!prevBaseline) {
-      throw new Error('往前 8 个祖先里没有任何一笔对 client/client.js 有改动块'
-        + ' ⇒ 找不到「真有 diff 的基线」，本组装置**不成立**（请用 CLD_DIFF_BASELINE 指定）');
-    }
-    const prevRes = evaluate({ tablePath, baseline: prevBaseline, refRoot });
-    prevOk = prevRes.exit === 1 && prevRes.stale.length > 0;
-    out.push(`  ${prevOk ? 'PASS' : 'FAIL'} 真身 · 基线 ${prevBaseline}（真有 diff）⇒ 必须报红且给出现应指向`);
-    out.push(`         〔本行只是**机制烟测**（mapper 能不能识别位移），**不是判据**：本表按 HEAD 的视图书写，`);
-    out.push(`          ${prevBaseline} 属于另一个帧，该读数按其定义就是帧错配，不得读作「表里有这么多陈旧引用」〕`);
-    out.push(prevOk
-      ? `         exit ${prevRes.exit} · 陈旧 ${prevRes.stale.length} · 不可判 ${prevRes.unmappable.length} · 同 ${prevRes.same.length}`
-      : `         exit ${prevRes.exit} · 陈旧 ${prevRes.exit === 2 ? '—' : prevRes.stale.length}${prevRes.reason ? ' · ' + prevRes.reason : ''}`);
-    if (!prevOk) failures += 1;
-  } catch (e) {
-    out.push(`  FAIL 真身 · 基线 ${prevBaseline} —— 装置抛异常：${String(e.message).split('\n')[0]}`);
-    deviceErrors += 1;
-  }
-
-  // 端到端的**定向**案子：在 prevBaseline 上注入一个已知搬了位置的行号，必须指出现应指向。
-  {
-    const prevBaseLines = splitLines(git(['show', `${prevBaseline}:client/client.js`])).lines;
-    const liveLines = splitLines(readFileSync(join(ROOT, 'client/client.js'), 'utf8')).lines;
-    const hunks = parseHunks(git(['diff', '--unified=0', '--no-color', '--no-ext-diff', prevBaseline, '--', 'client/client.js']));
-    const prevMap = mapStableLines(prevBaseLines, liveLines, hunks);
-    let moved = null;
-    for (let L = 1; L <= prevBaseLines.length && moved === null; L += 1) {
-      const r = prevMap(L);
-      if (r.state === 'ok' && r.now !== L) moved = { L, now: r.now };
-    }
-    if (moved === null) {
-      casesRun += 1;
-      out.push(`  FAIL 真身 · 定向案子 —— 在 ${prevBaseline} 上找不到任何「搬了位置」的行（装置前提不成立）`);
-      failures += 1;
+    // ⚠ 两处解析必须同时满足（本组最费劲的一格，我连撞三次）：
+    //   ① 现盘侧 `readFileSync(refAbs(f))`：相对 refRoot=临时树 ⇒ 临时树必须在**仓内**
+    //      （仓外则 gitPath()=null ⇒ 落「不在视野」⇒ inScope 为空 ⇒ exit 2「视野为空」）；
+    //   ② 基线侧 `git show <baseline>:<gitPath(f)>`：**只认已入库的路径**，未跟踪的临时路径取不到。
+    //   ⇒ 基线改按 **blob 对象**传（`git show <blob>`，git 允许不带路径）：基线 = 已入库冻结夹具的内容，
+    //     被引文件也用该夹具自己的路径，现盘侧写在临时树里的同名路径上。
+    //     两处输入因此都不依赖工作区未提交态，也不依赖提交历史里「找一笔有 diff 的祖先」。
+    // ⚠ 这里为什么让「现盘侧」落在夹具自己的路径上、并在跑完后**还原**（本组最费劲的一格，连撞四次）：
+    //   `evaluate` 对每个被引文件同时要满足两处解析：
+    //   ① 现盘侧 `readFileSync(refAbs(f))` —— 相对 refRoot 必须真存在；
+    //   ② 基线侧 `git show <baseline>:<gitPath(f)>` —— **只认已入库的路径**。
+    //   我试过、并逐条实测失败的三种形态：
+    //     · refRoot = os.tmpdir()          ⇒ gitPath()=null ⇒ 落「不在视野」⇒ exit 2「视野为空」；
+    //     · refRoot = 仓内新临时目录         ⇒ 路径未入库 ⇒ `git show <rev>:<临时路径>` 失败 ⇒ exit 2；
+    //     · baseline 传 blob SHA            ⇒ 变成 `<blob>:<路径>`，blob 不是 tree ⇒ 同样失败。
+    //   ⇒ 唯一同时成立的形态：**基线取该路径已入库的内容，现盘侧把构造件写回该路径**。
+    //   该文件（`scripts/fixtures/client.groups-pre-fix.js`）是**我自己的冻结件、且 4cee4b9 已入库**，
+    //   故这不是「借道别人的文件」；写完立即在 finally 里按原字节还原，并用 sha256 复核。
+    const fixtRel = secondFixtRel;
+    const preAbs = secondPreAbs;
+    const pfx = fixtRel;
+    let baseObj; let liveObj;
+    if (SECOND_BROKEN_BUILTIN) {
+      // 内置坏副本：基线 = 已入库夹具备份（读仓内夹具再串行化，与随后要写回的一样），
+      // 现盘 = **逐字节相同** ⇒ 位移 0 ⇒「搬了位置的行」在结构上不存在。
+      baseObj = readFileSync(preAbs, 'utf8');
+      liveObj = baseObj;
+      secondChecks.push('〔负向对照模式 CLD_2ND_ROOTS=builtin：脚本内置造出「位移不存在」的两份坏副本（现盘与基线逐字节相同），本组**必须**报红〕');
+    } else if (SECOND_BROKEN_DIRS) {
+      const [bDir, lDir] = SECOND_BROKEN_DIRS.split(':');
+      baseObj = readFileSync(join(bDir, fixtRel), 'utf8');
+      liveObj = readFileSync(join(lDir, fixtRel), 'utf8');
+      secondChecks.push(`〔负向对照模式 CLD_2ND_ROOTS=${SECOND_BROKEN_DIRS}：输入是两份被故意改坏的外部冻结副本，本组**必须**报红〕`);
     } else {
-      casesRun += 1;
-      const copy = join(dir, 'case-moved.md');
-      writeFileSync(copy, `${original}\n| 自检 | \`client/client.js:${moved.L}\` | 装置自检注入（基线 ${prevBaseline}） |\n`);
-      let res;
-      try {
-        res = evaluate({ tablePath: copy, baseline: prevBaseline, refRoot });
-      } catch (e) {
-        out.push(`  FAIL 真身 · 定向案子（:${moved.L} → :${moved.now}）—— 装置抛异常：${String(e.message).split('\n')[0]}`);
-        deviceErrors += 1;
-        res = null;
+      if (!existsSync(preAbs)) throw new Error(`夹具缺失：${preAbs}（本组不得退回活件，故直接抛）`);
+      baseObj = readFileSync(preAbs, 'utf8');
+      secondRestore = baseObj;   // 原字节，finally 里写回
+      // ⚠ 基线的**内容**必须钉死，否则又是「装置前提被提交历史换掉」那一族（本门早先就是这么退化的）。
+      //   但 `<blob>:<path>` 是**非法**形式（blob 不是 tree，实测 `git rev-parse <blob>:<path>` 报
+      //   `unable to resolve revision`）⇒ 只能仍按 `HEAD:<path>` 取。
+      //   ⇒ 改用「**期望对象 id 写死在代码里，实测不符就当场抛**」：HEAD 若漂移、夹具若被换，
+      //     本组立即报**装置故障**，绝不静默沿用漂移后的内容。
+      //   该值取自把本次改动入库前的那一笔（4cee4b9）里该文件的 blob。
+      const EXPECT_BLOB = 'b0d0e9c2a79f53311e3e7aa6e0352dd64d64037c';
+      secondBaseline = 'HEAD';
+      const gotBlob = git(['rev-parse', `${secondBaseline}:${fixtRel}`]).trim();
+      const hashed = createHash('sha256').update(baseObj, 'utf8').digest('hex').slice(0, 16);
+      if (gotBlob !== EXPECT_BLOB) {
+        throw new Error(`基线内容漂移：${secondBaseline}:${fixtRel} 解析为 ${gotBlob.slice(0, 12)}，期望 ${EXPECT_BLOB.slice(0, 12)}`
+          + ` ⇒ 本组前提不成立（夹具被换、或 HEAD 换了内容），拒绝沿用漂移后的基线`);
       }
-      if (res) {
-        const hit = res.stale.find((s) => s.file === 'client/client.js' && s.line === moved.L && s.now === moved.now);
-        if (hit) {
-          out.push(`  PASS 真身 · 定向案子：注入 :${moved.L} ⇒ 判决陈旧、且给出现应指向 :${moved.now}`);
-        } else {
-          failures += 1;
-          out.push(`  FAIL 真身 · 定向案子：注入 :${moved.L}（应指向 :${moved.now}）未被判出`
-            + ` —— exit ${res.exit}、陈旧 ${res.stale.length}`);
+      if (hashed !== '17fdeb74161eef98') {
+        throw new Error(`夹具内容漂移：盘上 sha256 = ${hashed}，期望 17fdeb74161eef98 ⇒ 本组前提不成立`);
+      }
+      secondChecks.push(`基线 = ${secondBaseline}:${fixtRel} ⇒ 对象 ${gotBlob.slice(0, 12)}（**钉死的期望值**）· 内容 sha256 ${hashed}`);
+    }
+    const baseLines = splitLines(baseObj).lines;
+    let liveLines; let hunks; let OFFSET;
+    if (SECOND_BROKEN) {
+      // 改坏的「现盘」：与基线逐字节相同 ⇒ 位移为 0 ⇒ 「搬了位置的行」在结构上不存在。
+      liveLines = [...baseLines];
+      hunks = [];
+      OFFSET = 0;
+    } else {
+      const INSERTS = [[100, 60], [200, 60]];   // [在第 N 行之后插入, 插入行数]
+      OFFSET = INSERTS.reduce((s, [, c]) => s + c, 0);   // 两处插入之后的净位移
+      liveLines = [];
+      for (let i = 0; i < baseLines.length; i += 1) {
+        liveLines.push(baseLines[i]);
+        for (const [after, cnt] of INSERTS) {
+          if (i + 1 === after) for (let k = 1; k <= cnt; k += 1) liveLines.push(`FROZEN-INS-${after}-${k}`);
         }
       }
+      let dlt = 0;
+      hunks = [];
+      for (const [after, cnt] of INSERTS) {
+        hunks.push({ oldStart: after + 1 + dlt, oldCount: 0, newStart: after + 1 + dlt, newCount: cnt });
+        dlt += cnt;
+      }
+      if (liveLines.length - baseLines.length !== OFFSET) {
+        throw new Error(`构造前提不成立：现盘 ${liveLines.length} − 基线 ${baseLines.length} = ${liveLines.length - baseLines.length}，应为 ${OFFSET}`);
+      }
+      secondChecks.push(`现盘副本 = 脚本内构造（基线第 ${INSERTS.map(([a, c]) => `${a} 行后插 ${c} 行`).join(' 与 ')}，净位移 +${OFFSET}，hunks 由构造算出、**不调 git**）`);
+      liveObj = liveLines.join('\n');
+    }
+    if (secondRestore !== null) writeFileSync(preAbs, liveObj, 'utf8');   // 现盘侧：构造件写回夹具路径（finally 还原）
+    const mapFn = mapStableLines(baseLines, liveLines, hunks);
+    // 见证行：先试优先点，再在其 ±400 行内扫。三条都成立才收（同内容 / mapper 位移 == 构造量 / 该行在现盘存在）。
+    const witnessAt = (PREF) => {
+      const tryLine = (L) => {
+        if (!(L >= 1 && L <= baseLines.length)) return null;
+        const nx = L + OFFSET;
+        if (nx > liveLines.length || liveLines[nx - 1] !== baseLines[L - 1]) return null;
+        // ⚠ 见证行的内容必须在**整份文件里唯一**：`mapStableLines` 用 indexOf 定位内容，
+        //   内容重复时它会命中**最前一处**，于是「见证行 L」其实不是 L（我实测撞到：:200 与自动恢复
+        //   标签那一行内容重复）。不唯一 ⇒ 换下一行，绝不「找到一个就收」。
+        if (baseLines.filter((x) => x === baseLines[L - 1]).length !== 1) return null;
+        const r = mapFn(L);
+        return (r.state === 'ok' && r.now - L === OFFSET) ? { L, now: r.now } : null;
+      };
+      for (let d = 0; d <= 400; d += 1) {
+        for (const L of (d === 0 ? [PREF] : [PREF - d, PREF + d])) {
+          const got = tryLine(L);
+          if (got) return got;
+        }
+      }
+      return null;
+    };
+    const WIT = witnessAt(2000);
+    const WINJ = witnessAt(1000);
+    if (!WIT || !WINJ) {
+      secondExtra = `在构造的冻结对上找不到承载行/见证行（优先点 :1000 与 :2000，±400 内扫）`
+        + ` ⇒ **装置前提不成立**（不是判据不成立）：基线 ${baseLines.length} 行 · 现盘 ${liveLines.length} 行 · 位移 ${OFFSET}`;
+    } else if (WIT.L - WINJ.L <= OFFSET) {
+      secondExtra = `见证行离承载行太近：${WIT.L} − ${WINJ.L} = ${WIT.L - WINJ.L}，须 > 插入块跨度 ${OFFSET}`;
+    } else {
+      // 一次真实读数：在表中注入一条位于基线行号上的引用，必须判决陈旧、且给出现应指向。
+      const copy = join(dir, 'case-moved.md');
+      writeFileSync(copy, `${original}\n| 自检 | \`${pfx}:${WIT.L}\` | 装置自检注入（冻结基线 :${WIT.L} → 构造现盘 :${WIT.now}） |\n`);
+      // 正样本必须先自证「基线读的确实是调用方传进来的那个修订/blob」——
+      //   否则装置里若有一处残留着 `HEAD`（或任何别的默认），断言会照样绿，而它考的根本不是传入件。
+      // ⚠ 比的是**对象 id**：`git rev-parse <revision>` 给的是**提交** id，而 `git rev-parse <revision>:<path>`
+      //   给的是**该路径在该修订下的 blob** id——两者本来就不相等，直接比会永远不等（我第一版就这么写，正样本当场红）。
+      //   正确做法：两个 `<rev>:<path>` 形态各取一次，比它们解出的对象 id。
+      const baseCtx = `${secondBaseline}:${pfx}`;
+      const gotA = git(['rev-parse', baseCtx]).trim();
+      const gotB = git(['rev-parse', `${baseline}:${pfx}`]).trim();
+      const liveSha = createHash('sha256').update(readFileSync(preAbs, 'utf8'), 'utf8').digest('hex');
+      if (gotA !== gotB) {
+        throw new Error(`正样本前提不成立：git rev-parse ${baseCtx} = ${gotA.slice(0, 12)}，而 ${secondBaseline}:${pfx} = ${gotB.slice(0, 12)}（应为同一 blob）`);
+      }
+      secondChecks.push(`正样本自证：基线 blob = ${gotA.slice(0, 12)}（${baseCtx} 解出，与 ${secondBaseline}:${pfx} 一致）· 现盘侧写回后内容 sha256 ${liveSha}`);
+      const res = evaluate({ tablePath: copy, baseline: secondBaseline ?? baseline, refRoot });
+      if (res.exit === 2) throw new Error(`注入读数取不到：${res.reason ?? ''}`);
+      const hit = res.stale.find((s) => s.file === pfx && s.line === WIT.L && s.now === WIT.now);
+      // ⚠ 净增必须**按 `(file, 基线行号)` 谓词**数，不能按「整个文件」数：
+      //   我注入的那一行里除了路径形 `${pfx}:${WIT.L}`，行尾还留了裸形 `:${WIT.now}`（说明应指向哪一行），
+      //   而本门的归属规则把同行裸号算给「同行最近一个带路径引用」⇒ 这一行**同时**被抽出两条引用
+      //   （`${WIT.L}` 与 `${WIT.now}`），两条都属 `pfx`。
+      //   我第一版按文件计数 ⇒ 净增读到 2、期望 1，误报「机制失效」——实为**计数谓词错**，机制是对的。
+      //   （实测证据：注入表上的两条陈旧 = 表:275 `${pfx}:2000 → 2120` 与 表:275 `${pfx}:2120 → 2240`。）
+      const countBy = (list, line) => list.filter((s) => s.file === pfx && s.line === line).length;
+      const baseStale = countBy(base.stale, WIT.L);
+      const injected = countBy(res.stale, WIT.L) - baseStale;
+      const extraSameFile = res.stale.filter((s) => s.file === pfx && s.line !== WIT.L).length;
+      if (!hit) {
+        secondOk = false;
+        secondChecks.push(`注入 :${WIT.L}（应指向 :${WIT.now}）未被判出 —— exit ${res.exit} · 陈旧 ${res.stale.length} · 理由 ${res.reason ?? '—'}`);
+      } else if (!(res.exit === 1 && injected === 1)) {
+        secondOk = false;
+        secondChecks.push(`注入被判出，但 exit ${res.exit}（应 1）或净增 ${injected}（应 1）`);
+      }
+      secondChecks.push(`承载行自证 ${WINJ.L} → ${WINJ.now}（逐字相同且位移 == +${OFFSET}）· 见证行 ${WIT.L} → ${WIT.now} · 两者间距 ${WIT.L - WINJ.L} > 跨度 ${OFFSET}`);
+      secondChecks.push(`exit ${res.exit} · 陈旧 ${res.stale.length} · 按 (${pfx}, 基线行 ${WIT.L}) 数：现盘 ${countBy(res.stale, WIT.L)}、基线 ${baseStale} ⇒ 净增 ${injected}（应 1）`
+        + `；同文件其它基线行 ${extraSameFile} 条（本门把注入行行尾的裸号 \`:${WIT.now}\` 算给同一行，属**预期**，不计入本断言的谓词）`);
+      secondChecks.push('〔本行是**机制证明**（mapper 能不能识别位移），不是对真实历史的读数：本表按 HEAD 的视图书写，'
+        + '冻结对属于另一个帧，其余条目按定义都是帧错配，不得读作「表里有这么多陈旧引用」〕');
+    }
+  } catch (e) {
+    secondDeviceErr = String(e.message).split('\n')[0];
+  } finally {
+    // ⚠ 无论成败都必须还原，并当场复核「还原后是否与基线内容逐位相同」——
+    //   「写完了 ≠ 写对了」：还原失败必须自己冒出来，不得让后续组读到构造件。
+    try {
+      if (secondRestore !== null) {
+        writeFileSync(secondPreAbs, secondRestore, 'utf8');
+        const back = readFileSync(secondPreAbs, 'utf8');
+        if (back !== secondRestore) {
+          secondDeviceErr = '还原失败：夹具内容与基线不再逐位相同（本组可能污染了后续组）';
+        }
+      }
+    } catch (e) {
+      secondDeviceErr = `还原抛异常：${String(e.message).split('\n')[0]}`;
     }
   }
-  out.push('');
+  if (SECOND_BROKEN) {
+    casesRun += 1;
+    if (secondOk && !secondDeviceErr && !secondExtra) {
+      failures += 1;
+      out.push('  FAIL 端到端真身 · 负向对照 —— CLD_2ND_ROOTS 指定了「位移不存在」的输入，本组却（错误地）报绿');
+    } else {
+      out.push(`  PASS 端到端真身 · 负向对照：CLD_2ND_ROOTS 指定「位移不存在」的输入 ⇒ 本组如期报红（${secondExtra ? '装置前提不成立' : secondDeviceErr ? '装置抛异常' : '判据不成立'}）`);
+      if (secondExtra) out.push(`         ${secondExtra}`);
+      if (secondDeviceErr) out.push(`         ${secondDeviceErr}`);
+    }
+  } else if (secondDeviceErr) {
+    deviceErrors += 1;
+    out.push(`  FAIL 端到端真身 · 冻结对 —— 装置抛异常：${secondDeviceErr}`);
+  } else if (secondExtra) {
+    deviceErrors += 1;
+    out.push(`  FAIL 端到端真身 · 冻结对 —— ${secondExtra}`);
+  } else if (!secondOk) {
+    failures += 1;
+    out.push('  FAIL 端到端真身 · 冻结对：注入的已知位移行未被判出');
+    for (const c of secondChecks) out.push(`         ${c}`);
+  } else {
+    out.push('  PASS 端到端真身 · 冻结对：注入的已知位移行 ⇒ 判决陈旧、且给出现应指向');
+    for (const c of secondChecks) out.push(`         ${c}`);
+  }
 
   out.push('  第三组 · 表副本用例（输入 = **冻结快照** scripts/fixtures/contracts.snapshot.md，与活表解耦）:');
   // ⚠ 冻结基准（2026-09-28，裁定 #75-5 的第二半，我差点又漏掉）：

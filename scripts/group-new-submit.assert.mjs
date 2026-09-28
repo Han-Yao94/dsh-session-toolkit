@@ -475,7 +475,11 @@ console.log('  ⑪ 装置自证：把本脚本拷成别的名字 ⇒ **入口守
 //       那读的是**另一个**故障，与守卫无关（我第一次就是这么把对照做假的）。
 casesRun += 1
 {
-  const probeName = 'guard-probe-' + process.pid + '.mjs'
+  // ⚠ 探针名**不得含 PID**：含 PID 时本门 `--selftest` 的 stdout 每次都不同，
+  //   「连跑两次逐字节相同」这条可复现性对照就无法成立（A 实测抓到第 38 行的
+  //   `guard-probe-36081.mjs` ↔ `guard-probe-36083.mjs`，我先前报「逐字节相同」是错的）。
+  //   固定名 + finally 里删除：名字确定，可复现；并发跑同一门时会互相踩，但那本来就不该并发跑。
+  const probeName = 'guard-probe-fixed-name.mjs'
   const probePath = path.join(path.dirname(new URL(import.meta.url).pathname), probeName)
   let probeOut = ''
   let probeCode = null
