@@ -236,6 +236,33 @@ jobs:
           node-version: 20
       - run: node scripts/settings-layout.assert.mjs --selftest
 
+  session-picker-assert:
+    # 会话选择器契约门（`client/client.js` 的 SessionPicker / GroupRow 结构）：
+    # 六格判据 = ① 会话按 cwd 分组、每组标题含「已选/总数」（逐个头核，不「找到一个就算」）
+    # ② 每组「全选本组/取消本组」的 id 列表派生自**该组 items**（不是全量 live）
+    # ③ 过滤框 +「已选 N / 共 M」+「清空选择」，且过滤状态 setter **确实**在 input.onChange 里被调用
+    #   （只判「有输入框 + 有 needle」是空断言：把 onChange 体掏空仍然全绿 —— 实测过）
+    # ④ 离线成员被渲染成行、行内不得有可勾复选框、必须有带 `aria-label` 的显式移除控件，
+    #   且离线集合仍是「已选 − 在线」的派生（裁定 #66 的行为契约：离线成员只可移除、不可勾选）
+    # ⑤ 组内开关用 `groupEnableLabel`、GroupRow 体内不得再出现 `enableLabel`（§215.3 语义相反缺陷）
+    # ⑥ 选择器作用域内不得出现 `overflow:auto|scroll` 规则（平台约定「滚动归外壳」）。
+    #
+    # 为什么本门**可以**挂 CI（判据同 `:223 settings-layout-assert`：红是否可被合理驳回）：**不能**。
+    #  ① 零外部输入 —— 只读本仓库 `client/client.js`，破坏全在 os.tmpdir() 副本上做，
+    #     不读已装 profile、不读 harness checkout、不打任何端口；
+    #  ② 属**契约门** —— 它的红只有一个动作（修 `client/client.js` 或修门），没有"这次可以放过"的
+    #     合法理由。判据边界：**只证结构，不证时序与视觉**（勾选延迟是否真的消失、Pill 与激活条的
+    #     真机观感，需人类复验）。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/session-picker.assert.mjs --selftest
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
@@ -249,7 +276,7 @@ jobs:
     #     （对照：`:46 dependency-skew.measure.mjs --selftest` 与 `:47 dsh-log-ui.drift.mjs --selftest`
     #      确实在 `selftest` job 里跑 —— 它们是**不需要外部 checkout**的自证步骤；本条之所以例外在
     #      「不进任何步骤」，理由是上面的"可被合理驳回"，与它们能否在 CI 跑无关。）
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert, session-picker-assert]
     # ⚠️ `request-guard` **加入 needs**（D 的判断；按上面的分界判据，它是契约门而非探测器，故不冲突）：
     #   判据同上：**红是否可被合理驳回**。
     #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），

@@ -1231,6 +1231,18 @@ collect('identity', apply);
     titleMissing: '未命名',
     noLiveSessions: '当前没有活跃会话',
     enabledGroups: '已启用',
+    groupNewLabel: '新建组',
+    groupEnabledShort: '已启用',
+    groupDisabledShort: '已关闭',
+    groupUnsavedShort: '未保存',
+    sessionsFilterPlaceholder: '过滤会话（标题 / 路径 / ID）',
+    sessionsSelectedCount: '已选 {a} / 共 {b}',
+    sessionsClear: '清空选择',
+    sessionsNoMatch: '没有匹配的会话',
+    sessionsGroupAll: '全选本组',
+    sessionsGroupNone: '取消本组',
+    sessionsOfflineTitle: '离线会话',
+    groupEnableLabel: '启用本组提示词',
   };
 
   var en = {
@@ -1293,6 +1305,18 @@ collect('identity', apply);
     titleMissing: 'Untitled',
     noLiveSessions: 'No active conversations',
     enabledGroups: 'Enabled',
+    groupNewLabel: 'New group',
+    groupEnabledShort: 'On',
+    groupDisabledShort: 'Off',
+    groupUnsavedShort: 'Unsaved',
+    sessionsFilterPlaceholder: 'Filter conversations (title / path / ID)',
+    sessionsSelectedCount: '{a} of {b} selected',
+    sessionsClear: 'Clear selection',
+    sessionsNoMatch: 'No matching conversations',
+    sessionsGroupAll: 'Select all in group',
+    sessionsGroupNone: 'Deselect group',
+    sessionsOfflineTitle: 'Offline conversations',
+    groupEnableLabel: 'Enable this group’s prompt',
   };
 
   // 字符上限来自 session-toolkit-ui（见 factory 顶部 uiCfg），渲染时读取。
@@ -1849,12 +1873,89 @@ collect('identity', apply);
                   })))));
   }
 
-  // ---- 组提示词：会话 picker（只列路由返回的 live 会话；已存但未在线的 id 仍可见可移除）----
+  // ---- 组提示词：字符数千分位（收起态与展开态共用，逗号分隔不依赖默认 locale）----
+  function formatCharCount(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  // ---- 组提示词：会话 picker（按工作区分组；离线成员单列一节，可移除不可勾）----
+  // 在线会话的唯一来源仍是路由投影（只读）；本组件不发明会话。
   function SessionPicker(props) {
     var t = props.t;
     var live = Array.isArray(props.live) ? props.live : [];
     var selected = Array.isArray(props.selected) ? props.selected : [];
     var onChange = props.onChange;
+    var filterState = React.useState('');
+    var filter = filterState[0], setFilter = filterState[1];
+
+    var liveById = {};
+    var liveOrder = {};
+    for (var li = 0; li < live.length; li++) {
+      var lid = String(live[li].id);
+      liveById[lid] = live[li];
+      liveOrder[lid] = li;
+    }
+    // 选中但不在线的 id：路由不列它，配置里还在 ⇒ 仍显示，可移除。
+    var offlineIds = [];
+    for (var si = 0; si < selected.length; si++) {
+      if (!liveById[selected[si]]) offlineIds.push(selected[si]);
+    }
+
+    var needle = filter.trim().toLowerCase();
+    function matchText(title, cwd, id) { return (title + '\n' + cwd + '\n' + id).toLowerCase().indexOf(needle) !== -1; }
+    function matchLive(s) {
+      if (needle === '') return true;
+      var id = String(s.id);
+      var cwd = (typeof s.cwd === 'string' && s.cwd !== '') ? s.cwd : '';
+      var title = (typeof s.title === 'string' && s.title !== '') ? s.title : t('titleMissing');
+      return matchText(id, cwd, title);
+    }
+
+    // ① 只保留含匹配会话的工作区；② 离线成员只在自身匹配时显示
+    var groupMap = {}, groupOrder = [];
+    for (var gi = 0; gi < live.length; gi++) {
+      var s = live[gi];
+      var sid = String(s.id);
+      var cwd = (typeof s.cwd === 'string' && s.cwd !== '') ? s.cwd : '';
+      var title = (typeof s.title === 'string' && s.title !== '') ? s.title : t('titleMissing');
+      var key = cwd !== '' ? cwd : '\u0000none';
+      var g = groupMap[key];
+      if (!g) { g = { path: key, title: cwd, items: [] }; groupMap[key] = g; groupOrder.push(key); }
+      g.items.push({ id: sid, title: title, cwd: cwd });
+    }
+    function tierOf(id) { return selected.indexOf(id) === -1 ? 1 : 0; }
+    var groups = [];
+    for (var go = 0; go < groupOrder.length; go++) {
+      var grp = groupMap[groupOrder[go]];
+      var kept = [];
+      for (var ki = 0; ki < grp.items.length; ki++) {
+        var it = grp.items[ki];
+        if (needle === '') { kept.push(it); continue; }
+        // 按 cwd 过滤时该组整体匹配 ⇒ 组内会话全部保留
+        if (matchText(grp.title, grp.title, '') || matchText(it.id, it.cwd, it.title)) kept.push(it);
+      }
+      if (kept.length === 0) continue;
+      kept.sort(function (a, b) {
+        var ta = tierOf(a.id), tb = tierOf(b.id);
+        if (ta !== tb) return ta - tb;
+        var na = liveOrder[a.id] || 0, nb = liveOrder[b.id] || 0;
+        return na - nb;
+      });
+      var onCount = 0;
+      for (var oc = 0; oc < kept.length; oc++) if (selected.indexOf(kept[oc].id) !== -1) onCount++;
+      groups.push({ path: grp.path, title: grp.title, items: kept, selectedCount: onCount, allSelected: onCount === kept.length });
+    }
+    var offlineRows = [];
+    for (var oi = 0; oi < offlineIds.length; oi++) {
+      var oid = String(offlineIds[oi]);
+      if (needle !== '' && !matchText(oid, '', oid)) continue;
+      offlineRows.push({ id: oid });
+    }
+
+    var total = live.length + offlineIds.length;
+    var shownTotal = 0;
+    for (var st = 0; st < groups.length; st++) shownTotal += groups[st].items.length;
+    shownTotal += offlineRows.length;
 
     function toggle(id) {
       var next = selected.slice();
@@ -1862,39 +1963,68 @@ collect('identity', apply);
       if (idx === -1) next.push(id); else next.splice(idx, 1);
       onChange(next);
     }
-    // 选中但当前不在线的 id：路由没列它，配置里还在 ⇒ 单独显示并标注，允许移除。
-    var liveIds = {};
-    for (var li = 0; li < live.length; li++) liveIds[live[li].id] = true;
-    var offline = [];
-    for (var si = 0; si < selected.length; si++) {
-      if (!liveIds[selected[si]]) offline.push(selected[si]);
+    // 只作用该工作区内的在线会话；已选但离线的 id 保持不动。
+    function toggleGroup(ids, on) {
+      if (on) {
+        var next = selected.slice();
+        for (var i = 0; i < ids.length; i++) if (next.indexOf(ids[i]) === -1) next.push(ids[i]);
+        onChange(next);
+        return;
+      }
+      var drop = {};
+      for (var d = 0; d < ids.length; d++) drop[ids[d]] = true;
+      var keptSel = [];
+      for (var k = 0; k < selected.length; k++) if (!drop[selected[k]]) keptSel.push(selected[k]);
+      onChange(keptSel);
     }
-    var rows = live.map(function (s) {
-      var id = String(s.id);
-      var title = (typeof s.title === 'string' && s.title !== '') ? s.title : t('titleMissing');
-      var cwd = (typeof s.cwd === 'string' && s.cwd !== '') ? s.cwd : '';
-      var meta = (cwd ? cwd + ' · ' : '') + id;
-      var checked = selected.indexOf(id) !== -1;
-      return React.createElement('label', { key: id, className: 'dsw-session-row', title: t('sessionIdLabel') + ': ' + id + (cwd ? '\n' + cwd : '') },
-        React.createElement('input', { type: 'checkbox', className: 'dsw-session-check', checked: checked, onChange: function () { toggle(id); } }),
-        React.createElement('span', { className: 'dsw-session-text' },
-          React.createElement('span', { className: 'dsw-session-title' }, title),
-          React.createElement('span', { className: 'dsw-session-meta' }, meta)));
+
+    var listNodes = groups.map(function (g) {
+      var ids = g.items.map(function (it) { return it.id; });
+      var head = React.createElement('div', { className: 'dsw-session-group-head' },
+        React.createElement('span', { className: 'dsw-session-group-path', title: g.title }, g.title),
+        React.createElement('span', { className: 'dsw-session-group-count' }, String(g.selectedCount) + '/' + String(g.items.length)),
+        React.createElement('button', { type: 'button', className: 'dsw-link-btn', onClick: function () { toggleGroup(ids, !g.allSelected); } }, t(g.allSelected ? 'sessionsGroupNone' : 'sessionsGroupAll')));
+      var rows = g.items.map(function (it) {
+        var checked = selected.indexOf(it.id) !== -1;
+        return React.createElement('label', { key: it.id, className: 'dsw-session-row', title: it.title + '\n' + t('sessionIdLabel') + ': ' + it.id + (it.cwd ? '\n' + it.cwd : '') },
+          React.createElement('input', { type: 'checkbox', className: 'dsw-session-check', checked: checked, onChange: function () { toggle(it.id); } }),
+          React.createElement('span', { className: 'dsw-session-text' },
+            React.createElement('span', { className: 'dsw-session-title' }, it.title),
+            React.createElement('span', { className: 'dsw-session-id' }, it.id.slice(0, 8))));
+      });
+      return React.createElement('div', { key: g.path, className: 'dsw-session-group' }, head,
+        React.createElement('div', { className: 'dsw-sessions-list' }, rows));
     });
-    if (rows.length === 0 && offline.length === 0) {
-      rows = [React.createElement('div', { key: '__none', className: 'dsw-session-meta' }, t('noLiveSessions'))];
+    if (offlineRows.length > 0) {
+      var offNodes = offlineRows.map(function (o) {
+        return React.createElement('div', { key: 'off-' + o.id, className: 'dsw-session-row offline', title: t('sessionOfflineHint') + '\n' + t('sessionIdLabel') + ': ' + o.id,
+            onClick: function (ev) { if (ev.target && ev.target.closest && ev.target.closest('.dsw-file-remove')) return; toggle(o.id); } },
+          React.createElement('span', { className: 'dsw-session-text' },
+            React.createElement('span', { className: 'dsw-session-title' }, o.id),
+            React.createElement('span', { className: 'dsw-session-id' }, t('sessionOffline'))),
+          React.createElement('button', { type: 'button', className: 'dsw-file-remove', onClick: function () { toggle(o.id); }, 'aria-label': t('remove') }, '\u00d7'));
+      });
+      listNodes.push(React.createElement('div', { key: '\u0000offline', className: 'dsw-session-group' },
+        React.createElement('div', { className: 'dsw-session-group-head' },
+          React.createElement('span', { className: 'dsw-session-group-path' }, t('sessionsOfflineTitle')),
+          React.createElement('span', { className: 'dsw-session-group-count' }, String(offlineRows.length))),
+        React.createElement('div', { className: 'dsw-sessions-list' }, offNodes)));
     }
-    var offRows = offline.map(function (id) {
-      return React.createElement('div', { key: 'off-' + id, className: 'dsw-session-row', title: t('sessionOfflineHint') + '\n' + t('sessionIdLabel') + ': ' + id },
-        React.createElement('span', { className: 'dsw-session-text' },
-          React.createElement('span', { className: 'dsw-session-title' }, id),
-          React.createElement('span', { className: 'dsw-session-meta' }, t('sessionOffline'))),
-        React.createElement('button', { type: 'button', className: 'dsw-file-remove', onClick: function () { toggle(id); }, 'aria-label': t('remove') }, '\u00d7'));
-    });
-    return React.createElement('div', { className: 'dsw-sessions' },
-      React.createElement('div', { className: 'dsw-files-label' }, t('sessionsLabel')),
-      React.createElement('div', { className: 'dsw-files-list' }, rows),
-      offRows.length > 0 ? React.createElement('div', { className: 'dsw-files-list' }, offRows) : null);
+
+    var countText = t('sessionsSelectedCount').replace('{a}', String(selected.length)).replace('{b}', String(total));
+    var head = React.createElement('div', { className: 'dsw-sessions-head' },
+      React.createElement('span', { className: 'dsw-sessions-label' }, t('sessionsLabel')),
+      React.createElement('span', { className: 'dsw-sessions-count' }, countText));
+    var filterRow = React.createElement('div', { className: 'dsw-sessions-filter' },
+      React.createElement('input', { type: 'text', className: 'dsw-sessions-search', value: filter, placeholder: t('sessionsFilterPlaceholder'), 'aria-label': t('sessionsFilterPlaceholder'), onChange: function (ev) { setFilter(ev.target.value); } }),
+      selected.length > 0
+        ? React.createElement(primitives.Pill, { onClick: function () { onChange([]); } }, t('sessionsClear'))
+        : null);
+    var body = listNodes.length > 0
+      ? React.createElement('div', { className: 'dsw-sessions-groups' }, listNodes)
+      : React.createElement('div', { className: 'dsw-sessions-empty' },
+          live.length === 0 && offlineIds.length === 0 ? t('noLiveSessions') : t('sessionsNoMatch'));
+    return React.createElement('div', { className: 'dsw-sessions' }, head, filterRow, body);
   }
 
   // ---- 组提示词：一行 = 一个组（组名 = config 字典键）----
@@ -2101,15 +2231,19 @@ collect('identity', apply);
     var memberText = members.length === 0 ? t('groupNoMembers') : (String(members.length) + ' ' + t('groupMembersUnit'));
     var areaId = 'dsw-group-area-' + groupKey;
 
-    var collapsed = React.createElement('span', { className: 'dsw-group-members' }, memberText);
+    var collapsed = React.createElement('span', { className: 'dsw-group-members' },
+      React.createElement('span', null, memberText),
+      React.createElement('span', { className: 'dsw-group-status' + (enabled ? ' on' : '') }, ' · ' + t(enabled ? 'groupEnabledShort' : 'groupDisabledShort')),
+      content.length > 0 ? React.createElement('span', { className: 'dsw-group-status' }, ' · ' + formatCharCount(content.length) + ' ' + t('charUnit')) : null,
+      dirty ? React.createElement('span', { className: 'dsw-group-unsaved' }, ' · ' + t('groupUnsavedShort')) : null);
     var headExtra = renaming
-      ? React.createElement('span', { className: 'dsw-group-add' },
+      ? React.createElement('span', null,
           React.createElement('input', { className: 'dsw-group-name-input', value: nameDraft, placeholder: t('groupNamePlaceholder'), onChange: function (e) { setNameDraft(e.target.value); setNameErr(null); }, onKeyDown: function (e) {
             if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
             if (e.key === 'Escape') { e.preventDefault(); setNameDraft(groupKey); setNameErr(null); onRenamingChange(false); }
           } }),
           React.createElement(primitives.Button, { variant: 'primary', size: 'sm', onClick: commitRename }, t('save')))
-      : React.createElement('span', { className: 'dsw-group-add' },
+      : React.createElement('span', null,
           React.createElement('span', { className: 'dsw-group-tag ' + (enabled ? 'on' : 'off') }, enabled ? t('badgeOn') : t('badgeOff')));
 
     return React.createElement(primitives.DisclosureRow, {
@@ -2119,6 +2253,7 @@ collect('identity', apply);
       expandable: true,
       keepContentWhenOpen: true,
       collapsedContent: collapsed,
+      className: 'dsw-group-card',
       onToggle: function () { if (open) flushSessions(); onToggleOpen(!open); },
       expandOnRowClick: true,
     },
@@ -2127,7 +2262,7 @@ collect('identity', apply);
           React.createElement('div', { className: 'dsw-files-label' }, t('groupName')),
           headExtra),
         nameErr ? React.createElement('div', { className: 'dsw-removed-hint' }, nameErr) : null,
-        React.createElement(SwitchRow, { t: t, enabled: enabled, onToggle: function () { saveEnabled(!enabled); }, label: t('enableLabel'), hint: t('groupEnableHint') }),
+        React.createElement(SwitchRow, { t: t, enabled: enabled, onToggle: function () { saveEnabled(!enabled); }, label: t('groupEnableLabel'), hint: t('groupEnableHint') }),
         React.createElement('div', { className: 'dsw-content' + (disabled ? ' dsw-disabled' : '') },
           React.createElement('div', { className: 'dsw-label-row' },
             React.createElement('label', { className: 'dsw-label', htmlFor: areaId }, t('contentLabel')),
@@ -2222,10 +2357,11 @@ collect('identity', apply);
     for (var ei = 0; ei < keys.length; ei++) { if (groups[keys[ei]] && groups[keys[ei]].enabled === true) enabledCount++; }
 
     var head = React.createElement('div', { className: 'dsw-groups-head' },
-      React.createElement('div', { className: 'dsw-group-add' },
-        React.createElement('input', { className: 'dsw-file-input', value: addName, placeholder: t('groupNewPlaceholder'), onChange: function (e) { setAddName(e.target.value); setAddErr(null); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } } }),
-        React.createElement(primitives.Button, { variant: 'ghost', size: 'sm', disabled: addName.trim() === '', onClick: addGroup }, t('groupAdd'))),
-      React.createElement('span', { className: 'dsw-groups-count' }, String(keys.length) + ' ' + t('groupsLabel') + ' · ' + String(enabledCount) + ' ' + t('enabledGroups')));
+      React.createElement('div', { className: 'dsw-groups-head-card' },
+        React.createElement('label', { className: 'dsw-groups-head-label' }, t('groupNewLabel')),
+        React.createElement('input', { className: 'dsw-group-new-input', value: addName, placeholder: t('groupNewPlaceholder'), 'aria-label': t('groupNewLabel'), onChange: function (e) { setAddName(e.target.value); setAddErr(null); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } } }),
+        React.createElement(primitives.Button, { variant: 'primary', size: 'sm', disabled: addName.trim() === '', onClick: addGroup }, t('groupAdd'))),
+      React.createElement(primitives.Pill, { className: 'dsw-groups-count' }, String(keys.length) + ' ' + t('groupsLabel') + ' · ' + String(enabledCount) + ' ' + t('enabledGroups')));
 
     if (keys.length === 0) {
       return React.createElement('div', { className: 'dsw-groups' }, head,
@@ -2370,25 +2506,48 @@ collect('identity', apply);
     // —— 组提示词标签页 ——
     '.dsw-groups{display:flex;flex-direction:column;gap:12px}',
     '.dsw-groups-head{display:flex;align-items:center;gap:8px}',
-    '.dsw-groups-count{font-size:12px;color:var(--dsw-text-sub);font-variant-numeric:tabular-nums}',
-    '.dsw-group-add{display:flex;gap:8px;flex:1;min-width:0}',
+    '.dsw-groups-count{flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}',
+    '.dsw-groups-head-card{display:flex;align-items:center;gap:12px;flex:1;min-width:0;padding:10px 12px;border:1px solid var(--dsw-alias-settings-card-stroke);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-settings-card-fill)}',
+    '.dsw-groups-head-label{flex:none;font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary)}',
+    '.dsw-group-new-input{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-xs);background:var(--dsw-bg-card);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:13px}',
+    '.dsw-group-new-input:focus{outline:none;border-color:var(--dsw-alias-border-l2);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-hover-accent)}',
     '.dsw-groups-list{display:flex;flex-direction:column;gap:12px}',
     '.dsw-group-members{font-size:12px;color:var(--dsw-text-sub)}',
-    '.dsw-group-card{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:10px 12px;background:var(--dsw-bg-card)}',
-    '.dsw-group-body{display:flex;flex-direction:column;gap:12px;padding:2px 0 6px 2px}',
+    '.dsw-group-status{font-size:12px;color:var(--dsw-alias-label-secondary)}',
+    '.dsw-group-status.on{color:var(--dsw-alias-state-success-primary)}',
+    '.dsw-group-unsaved{font-size:12px;color:var(--dsw-warn)}',
+    '.dsw-group-card{border:1px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md);padding:10px 12px;background:var(--dsw-bg-card)}',
+    '.dsw-group-body{display:flex;flex-direction:column;gap:12px;padding:2px 0 0 0}',
     '.dsw-group-name{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.dsw-group-name-input{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-bg-card);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:13px}',
     '.dsw-group-name-input:focus{outline:none;border-color:var(--dsw-alias-border-l2);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-hover-accent)}',
     '.dsw-group-tag{flex:none;height:20px;line-height:20px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}',
     '.dsw-group-tag.on{background:var(--dsw-alias-state-success-tertiary);color:var(--dsw-alias-state-success-primary)}',
     '.dsw-group-tag.off{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
-    '.dsw-sessions{display:flex;flex-direction:column;gap:6px;padding:12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:8px}',
-    '.dsw-session-row{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;transition:background .15s ease}',
+    '.dsw-sessions{display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm)}',
+    '.dsw-sessions-head{display:flex;align-items:center;justify-content:space-between;gap:12px}',
+    '.dsw-sessions-label{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary)}',
+    '.dsw-sessions-count{flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+    '.dsw-sessions-filter{display:flex;align-items:center;gap:8px}',
+    '.dsw-sessions-search{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-xs);background:var(--dsw-bg-card);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:13px}',
+    '.dsw-sessions-search:focus{outline:none;border-color:var(--dsw-alias-border-l2);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-hover-accent)}',
+    '.dsw-sessions-empty{font-size:12px;color:var(--dsw-text-sub)}',
+    '.dsw-link-btn{flex:none;padding:0;border:none;background:transparent;color:var(--dsw-alias-label-secondary);font-family:var(--dsw-font-family);font-size:12px;line-height:18px;cursor:pointer;transition:color .15s ease}',
+    '.dsw-link-btn:hover{color:var(--dsw-alias-label-primary)}',
+    '.dsw-sessions-groups{display:flex;flex-direction:column;gap:12px}',
+    '.dsw-session-group{display:flex;flex-direction:column;gap:4px}',
+    '.dsw-session-group-head{display:flex;align-items:center;justify-content:space-between;gap:8px}',
+    '.dsw-session-group-path{flex:1;min-width:0;font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.dsw-session-group-count{flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+    '.dsw-sessions-list{display:flex;flex-direction:column}',
+    '.dsw-session-row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--dsw-radius-xs);cursor:pointer;transition:background .15s ease}',
     '.dsw-session-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
-    '.dsw-session-check{flex:none;margin:2px 0 0 0}',
-    '.dsw-session-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}',
-    '.dsw-session-title{font-size:13px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-    '.dsw-session-meta{font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.dsw-session-row.offline{cursor:default;opacity:.6}',
+    '.dsw-session-row.offline:hover{background:transparent}',
+    '.dsw-session-check{flex:none;margin:0}',
+    '.dsw-session-text{display:flex;align-items:baseline;gap:8px;min-width:0;flex:1}',
+    '.dsw-session-title{font-size:13px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}',
+    '.dsw-session-id{flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
     '',
   ].join('\n');
 
