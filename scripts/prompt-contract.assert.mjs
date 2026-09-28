@@ -604,7 +604,18 @@ const SRC_FOR_C = { 'lib/mod.js': Array.from({ length: 20 }, (_, i) => `const x$
 const PROBE_REL = `docs/agents/.d-${process.pid}-probe.md`;
 const PROBE_SRC_REL = `scripts/.d-${process.pid}-src.js`;
 const PROBE_SCRATCH = pathResolve('/tmp', `d-prompt-contract-${process.pid}`);
+// 负自查用例（裁定 #89②/#90②，2026-09-28 补）的夹具根：**必须在仓内** ——
+//   扫描根只决定「去哪找 .md」，而 C2 注记的**目标路径一律按 ROOT 解析**（本门不做扫描根外跳过）。
+//   夹具放 /tmp 的话，那条被引路径会落 `resolveRef` 的「不在本仓视野」⇒ C1 计数为 0 ⇒ `mainScan`
+//   先被空视野闸（EXIT 2 未评测态）挡下，`!isFile` 臂**根本不执行**（D 在 §86-D 就栽在这里）。
+//   放 `docs/agents/` 下并用 `.` 前缀：隐藏目录，既不进默认扫描、也不留可见脏物。
+const PROBE_UNDEC_REL = `docs/agents/.d-${process.pid}-undec`;
+const PROBE_UNDEC = pathResolve(ROOT, PROBE_UNDEC_REL);
+// 夹具里被引目标一律用**仓内相对形**（如 `docs/agents/.d-N/scan-b/scripts/x.mjs`）：
+//   `resolveRef`（`:264`）按路径**首段**判是否在本仓视野，绝对路径首段是空串 ⇒ 整条落「不在本仓视野」
+//   ⇒ C1 计数为 0 ⇒ 空视野闸先断，`!isFile` 臂根本执行不到（这正是我第一版夹具失败的原因）。
 function probeCleanup() {
+  for (const p of [PROBE_UNDEC]) if (existsSync(p)) rmSync(p, { recursive: true, force: true });
   for (const rel of [PROBE_REL, PROBE_SRC_REL]) {
     const p = join(ROOT, rel);
     if (existsSync(p)) rmSync(p, { force: true });
@@ -763,6 +774,57 @@ function runSelftest() {
     add('⑧ 现盘基线 ⇒ 0 条判据不成立', baseRep.problems.length === 0, baseRep.problems.slice(0, 3).join(' | '));
     console.log('  —— 现盘基线：C1 带行号引用 ' + base.c1.refs + ' · 链接 ' + base.c1.links + ' · 不在视野 ' + base.c1.outside.length + ' · 本仓无此文件 ' + base.c1.missing.length
       + ' ｜ C2 不一致 ' + base.c2.judged + '（豁免 ' + base.c2.exempt.length + ' · 提交号可解释 ' + base.c2.verified.length + ' · 无法解释 ' + base.c2.bad.length + '）｜ C3 命中 ' + base.c3.bad.length);
+    // ⑥ 负自查（裁定 #89② / #90②）：结构化统计注记的目标不是普通文件 ⇒ fail-closed 两档。
+    //   两条夹具都必须先把**视野闸**喂饱（C1 至少抽到一条带行号的引用），否则 mainScan 先以
+    //   EXIT 2「未评测态」返回，`!isFile` 臂根本不执行 —— D 在 §86-D 正是把这种「没跑成」记成了「判据成立」。
+    //   ⚠️ 负例 A 的目标**取绝对路径**不是随手选的：相对形（如 `docs/agents/.d-N/…/NOSUCH.mjs` 或裸文件名）
+    //   会被 C1 抽成「本仓无此文件」⇒ 先以判据红（EXIT 1）返回，`!isFile` 臂又进不去。
+    //   成形探针实测：绝对象既不进 C1、也不落「本仓无此文件」，正好只走 C2 注记臂。
+    //   反向对照：把上面那条 `continue` 去掉（或前面插 `if (false)`）⇒ ⑥/⑥b/⑥c 必须转红，
+    //   否则用例只是同义反复（自保①）。
+    {
+      const uaDir = join(PROBE_UNDEC, 'scan-a');
+      const ubDir = join(PROBE_UNDEC, 'scan-b');
+      const uaTargetAbs = join(uaDir, 'NOSUCH-probe.mjs'); // 绝对象：既不被 C1 抽成形，也不落「本仓无此文件」（成形探针实测）
+      const ubTargetRel = `${PROBE_UNDEC_REL}/scan-b/scripts/fixtures.dir-probe.mjs`; // 仓内相对形，实为目录
+      const ubTargetAbs = join(ubDir, 'scripts', 'fixtures.dir-probe.mjs');
+      mkdirSync(uaDir, { recursive: true });
+      mkdirSync(ubTargetAbs, { recursive: true }); // 目录：存在但非普通文件（不用 FIFO，免平台差异）
+      // 视野闸的燃料必须是一条**此刻真实存在**的引用：`srcAbs` 早在 ⑧ 的清场里就被撤掉了，
+      //   故这里钉仓内既有文件 `lib/auto-resume.js`（相对形可解析 ⇒ C1 refs≥1）。
+      const realRef = '- 真引用（喂饱视野闸）：`lib/auto-resume.js:193`\n';
+      const trip = '`deadbeefdeadbeef…` / 99999 B / 99 行';
+      writeFileSync(join(uaDir, 'fixture.md'),
+        '# scan-a\n\n' + realRef + `- 目标全仓不存在：\`${uaTargetAbs.split('\\').join('/')}\`（${trip}）\n`);
+      writeFileSync(join(ubDir, 'fixture.md'),
+        '# scan-b\n\n' + realRef + `- 目标存在但非普通文件：\`${ubTargetRel}\`（${trip}）\n`);
+      const sa = scan({ scanRoot: uaDir });
+      const sb = scan({ scanRoot: ubDir });
+      const codeA = mainScan(uaDir);
+      const codeB = mainScan(ubDir);
+      const ua = sa.c2.noteUndecidable;
+      const ub = sb.c2.noteUndecidable;
+      const refsA = sa.c1.refs + sa.c1.links;
+      const refsB = sb.c1.refs + sb.c1.links;
+      // 两条「视野闸已喂饱」的机检：视野引用 ≥1 且 C1 三档全空（否则「EXIT 2」可能来自空视野闸）
+      const fedA = refsA >= 1 && sa.c1.violations.length === 0 && sa.c1.missing.length === 0 && sa.c1.outside.length === 0;
+      const fedB = refsB >= 1 && sb.c1.violations.length === 0 && sb.c1.missing.length === 0 && sb.c1.outside.length === 0;
+      add('⑥ 注记目标「全仓不存在」 ⇒ 不可判定（EXIT 2，不得读作通过）',
+        codeA === EXIT_DEV && ua.length === 1 && ua[0].why === '全仓不存在' && fedA,
+        `EXIT=${codeA} · 不可判定=${ua.length} · why=${ua[0]?.why ?? '（无）'} · 视野引用=${refsA} · C1隙=${sa.c1.violations.length}/${sa.c1.missing.length}/${sa.c1.outside.length}`);
+      add('⑥b 注记目标「存在但非普通文件」（目录） ⇒ 不可判定（EXIT 2）',
+        codeB === EXIT_DEV && ub.length === 1 && ub[0].why === '存在但非普通文件' && fedB,
+        `EXIT=${codeB} · 不可判定=${ub.length} · why=${ub[0]?.why ?? '（无）'} · 视野引用=${refsB} · C1隙=${sb.c1.violations.length}/${sb.c1.missing.length}/${sb.c1.outside.length}`);
+      // ⑥c 负向对照（不依赖人手动改源码）：断言「该臂真的把这两条逮住了」。
+      //   若 `!isFile` 臂被改成 fail-open（阈值跳过 / 拿掉 continue），则：目标不存在的那条会落
+      //   「统计注记与现盘不符」的**判据红**（EXIT 1，不是 2），目标为目录的那条会**直接抛异常**
+      //   （readFileSync EISDIR，被 catch 成「装置抛异常」）—— 两种情形下这条都转红。
+      add('⑥c 负向对照成立：该臂既非恒真、也未把「没跑成」当成「判过」（EXIT 1 / 装置异常均不算通过）',
+        codeA === EXIT_DEV && codeB === EXIT_DEV && ua.length === 1 && ub.length === 1
+          && ua[0].why === '全仓不存在' && ub[0].why === '存在但非普通文件' && fedA && fedB,
+        `A=EXIT ${codeA}/why ${ua[0]?.why ?? '（无）'}/refs ${refsA} · B=EXIT ${codeB}/why ${ub[0]?.why ?? '（无）'}/refs ${refsB}`);
+    }
+
   } catch (e) {
     devErrors.push(e.stack ?? String(e));
   } finally {
