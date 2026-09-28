@@ -263,6 +263,33 @@ jobs:
           node-version: 20
       - run: node scripts/session-picker.assert.mjs --selftest
 
+  group-new-submit-assert:
+    # 「新建组」提交路径契约门（`client/client.js` 的 dsw-group-new-input）：
+    # 三格判据 = ① 新建组输入框的 props 里**不存在**任何键盘分支（onKeyDown 缺席，且 props 不出现
+    #   创建函数名）—— 人类所有者原话：「输入组名后按回车键会直接创建组，这个需要调整，不能回车
+    #   直接创建，要点击新建组按钮才能创建」；
+    # ② 同一卡片里的主色按钮仍以 `onClick` 绑定 `addGroup`，且 `disabled` 仍是「空名禁用」
+    #   （防的是「回车删了、按钮也一起改坏」这种修一半）；
+    # ③ 另三处键盘路径逐字未动（引用文件输入的回车、重命名输入的回车、Ctrl/Cmd+S 保存）——
+    #   `anchor()` 要求逐字命中**且全程唯一**，防的是「把回车分支挪到别的输入」被算成通过。
+    #
+    # 为什么本门**可以**挂 CI（判据同 `:250 session-picker-assert`：红是否可被合理驳回）：**不能**。
+    #  ① 零外部输入 —— 只读本仓库 `client/client.js`，变异全在内存副本上做，不读已装 profile、
+    #     不读 harness checkout、不打任何端口；自检的负向对照吃的是 `scripts/fixtures/` 里两份
+    #     冻结夹具，不读 git 历史、不读盘上活件（否则 C 的改动一提交，自检会自己变红）；
+    #  ② 属**契约门** —— 它的红只有一个动作（修 `client/client.js` 或修门），没有"这次可以放过"的
+    #     合法理由。判据边界：**只证源码结构，不证运行期行为**（回车到底还建不建组、按钮点击是否
+    #     真的落库，需人类真机复验）；判据按 className + props 文本定位，**不写行号**。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/group-new-submit.assert.mjs --selftest
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
@@ -276,7 +303,7 @@ jobs:
     #     （对照：`:46 dependency-skew.measure.mjs --selftest` 与 `:47 dsh-log-ui.drift.mjs --selftest`
     #      确实在 `selftest` job 里跑 —— 它们是**不需要外部 checkout**的自证步骤；本条之所以例外在
     #      「不进任何步骤」，理由是上面的"可被合理驳回"，与它们能否在 CI 跑无关。）
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert, session-picker-assert]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert, session-picker-assert, group-new-submit-assert]
     # ⚠️ `request-guard` **加入 needs**（D 的判断；按上面的分界判据，它是契约门而非探测器，故不冲突）：
     #   判据同上：**红是否可被合理驳回**。
     #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），

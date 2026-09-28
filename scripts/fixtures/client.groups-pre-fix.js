@@ -2359,7 +2359,7 @@ collect('identity', apply);
     var head = React.createElement('div', { className: 'dsw-groups-head' },
       React.createElement('div', { className: 'dsw-groups-head-card' },
         React.createElement('label', { className: 'dsw-groups-head-label' }, t('groupNewLabel')),
-        React.createElement('input', { className: 'dsw-group-new-input', value: addName, placeholder: t('groupNewPlaceholder'), 'aria-label': t('groupNewLabel'), onChange: function (e) { setAddName(e.target.value); setAddErr(null); } }),
+        React.createElement('input', { className: 'dsw-group-new-input', value: addName, placeholder: t('groupNewPlaceholder'), 'aria-label': t('groupNewLabel'), onChange: function (e) { setAddName(e.target.value); setAddErr(null); }, onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } } }),
         React.createElement(primitives.Button, { variant: 'primary', size: 'sm', disabled: addName.trim() === '', onClick: addGroup }, t('groupAdd'))),
       React.createElement(primitives.Pill, { className: 'dsw-groups-count' }, String(keys.length) + ' ' + t('groupsLabel') + ' · ' + String(enabledCount) + ' ' + t('enabledGroups')));
 
