@@ -13,13 +13,17 @@
 //   ⑧ 默认命名空间剔除不越界 —— 且必须配「稳定态每轮新增读盘 = 0 / 改内容后 = > 0」（只有前者会被
 //      「干脆不缓存」蒙过去：把缓存整个关掉也能得到「不越界」，但那不是修复）
 //
-// 三态退出码（与仓库其余门一致）：0 通过 · 1 断言不成立 · 2 装置自身没跑成 · 64 用法错。
+// 退出码：0 通过 · 1 断言不成立 / 未能确证（fail-closed，两者都不退 2）· 2 未能评测 · 64 用法错。
+//   —— 裁定 #64：**整门级**「测不了」（被判对象在评测前就不可加载/解析）⇒ 2，输出「未能评测：…」，
+//      且**不得**逐条打印 FAIL Cn、**不得**声称「N 条判据不成立」（一条都没被评估过）。
+//      机械口径 = `precheck()` 先 import 一次；预检通过后的任何失败仍走 1。
+//      判据级「测不了」⇒ 仍 1，但**计数分开**：`failures`（不成立）与 `unverified`（未能确证）。
 // 纪律：每条断言各配**恰好一次**负向对照；变异锚点必须恰好命中 1 次，否则判 2（不许静默 no-op）；
 //      每条变异只允许翻掉它点名的那条断言，其余断言必须保持绿（未点名的用例不得被连带翻转）。
 //
 // 用法：
 //   node scripts/group-prompt.contract.assert.mjs             # 判真实文件（常驻/CI 路径）
-//   node scripts/group-prompt.contract.assert.mjs --selftest   # 基线 + 六份变异，自证本门会报红
+//   node scripts/group-prompt.contract.assert.mjs --selftest   # 基线 + 九份变异，自证本门会报红
 //   node scripts/group-prompt.contract.assert.mjs --help
 //
 // 零外部输入、零裸依赖（只用 node: 内建）。副本一律落 os.tmpdir()，工作区零写入。
@@ -44,7 +48,7 @@ for (const a of argv) {
   else if (a === '--probe') probe = true
   else if (a === '--help' || a === '-h') {
     console.log('用法：node scripts/group-prompt.contract.assert.mjs [--selftest] [--probe]')
-    console.log('  --selftest  造八份变异副本，自证本门会报红（副本在 os.tmpdir()，工作区零写入）')
+    console.log('  --selftest  造九份变异副本，自证本门会报红（副本在 os.tmpdir()，工作区零写入）')
     console.log('  --probe     只打印每条判据的原始观测值（装置诊断用，不改变判定）')
     process.exit(EXIT.PASS)
   } else {
@@ -171,12 +175,17 @@ async function loadGlobalPrompt(sourceText) {
   const url = freshUrl(file)
   return { mod: await import(url), dir }
 }
+// ⚠️ 落盘副本的目录必须有人收尾：`loadDedup` 造的是**新目录**（不是 `runOnce` 的 `dirs` 台账），
+//    早先只有 `loadGlobalPrompt` 的返回值被登记 ⇒ 每次变异自证都漏一批 `d-gpguard-dedup-*`
+//    （实测盘上积到 376 个、近 10 分钟 112 个）。这里用一个模块级台账接住，由 `runOnce` 的 finally 统一删。
+const LIVE_DIRS = new Set()
 async function loadDedup(sourceText) {
   if (sourceText === null) {
     const url = freshUrl(path.join(ROOT, DEDUP_REL))
     return await import(url)
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'd-gpguard-dedup-'))
+  LIVE_DIRS.add(dir)
   const file = path.join(dir, 'prompt-dedup.js')
   fs.writeFileSync(file, sourceText)
   const url = freshUrl(file)
@@ -633,7 +642,9 @@ async function runOnce(sourceText, dedupText, opts) {
           const orig = fs.readFileSync(target, 'utf8')
           // ⚠️ 「同尺寸」必须按**实测**字节数凑：`ref.md` 的盘上内容与 `EXTRA` 的字面量并不等长
           //    （实测 stat=18 B，而 `'旧A\n引用文件内容'`=23 B ⇒ 我第一版判据直接卡在尺寸不符上，
-          //     七份变异各多出一条「未点名判据被连带翻转」= 同一处装置错的回声）。
+          //     九份变异各多出一条「未点名判据被连带翻转」= 同一处装置错的回声）。
+          //     （口径更正：此处当年实测的是**当时那七份**变异；自那以后 M8/M9 各补一次 C8 的
+          //      独立对照 ⇒ 现在是九份 —— 上面的数字是历史叙述，不是现状。）
           //    这里用「行首标记字符 + 空格补齐」把两串都凑到实测长度；行首差异对 `indexOf` 可见，
           //    而空格落在行首标记之后、`indexOf` 也把它当字面量 ⇒ 肉眼可辨、比较可靠。
           const origin = orig.replace(/^\n+/, '')
@@ -774,6 +785,10 @@ async function runOnce(sourceText, dedupText, opts) {
     }
     return { groupText, groupInterpolate: gsec.interpolate, filePath: filePaths['ref.md'], _ctx: ctx, _diag: { groupsKeyCount: Object.keys(groups).length, agentId: opts.agent && opts.agent.session && opts.agent.session.header ? opts.agent.session.header.id : null, gsecIndex: ctx.sections.findIndex((s) => s === gsec), globalEnabledRaw: opts.global ? opts.global.enabled : undefined } }
   } finally {
+    // `LIVE_DIRS` = 本函数执行期间 `loadDedup` 落下的副本目录（模块级台账，见其定义处）；
+    // 与 `dirs` 一起删，保证「副本一律落 os.tmpdir() 且每次运行都收尾」这句话成立。
+    for (const d of LIVE_DIRS) dirs.push(d)
+    LIVE_DIRS.clear()
     for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch (e) { /* 略 */ } }
   }
 }
@@ -881,7 +896,107 @@ function mutate(src, m) {
   return { error: null, text }
 }
 
-// ── 主流程 ──────────────────────────────────────────────────────────────────
+// ── 预检（裁定 #64 第 1 条，机械口径）─────────────────────────────────────────
+// 「整门级测不了」与「某条判据不成立」必须有一个**客观分界**，否则 2 与 1 全凭叙述：
+//   这里在跑任何判据之前，先按被测对象真实存在的形态加载一次（`import()` 走模块解析 + 编译 + 求值）。
+//   失败（语法错 / 文件被删 / 导入即抛）⇒ 一条判据都没被评估过 ⇒ 整门走 2，且**只**打印「未能评测」。
+//   成功 ⇒ 后面任何失败都是判据级 ⇒ 仍走 1。
+//   ⚠️ 候选写法「`import('data:text/javascript;base64,…')`」**实测不可用，已废弃**：data: 是非层级
+//      scheme，`./request-guard.js` 这类相对导入会直接抛
+//      `Failed to resolve module specifier "./request-guard.js" from "data:…": Invalid relative URL or
+//       base scheme is not hierarchical.` ⇒ **合法源码也会被判成「未能评测」**（假 2）。
+//   ⇒ 固定做法：把源码落进独立的 os.tmpdir() 目录（相对导入落到该目录的桩上，与真身同形），
+//      用**单调递增 query** 的 file:// URL 导入（沿用 `freshUrl`：同 URL 会命中 ESM 缓存拿到旧实例）。
+async function precheck(globalText, dedupText) {
+  const mods = [
+    { text: globalText, rel: TARGET_REL },
+    { text: dedupText, rel: DEDUP_REL },
+  ]
+  const dirs = []
+  try {
+    for (const m of mods) {
+      let url
+      if (m.text === null) {
+        url = freshUrl(path.join(ROOT, m.rel))
+      } else {
+        const dir = sandbox()
+        dirs.push(dir)
+        const f = path.join(dir, path.basename(m.rel))
+        fs.writeFileSync(f, m.text)
+        url = freshUrl(f)
+      }
+      try {
+        await import(url)
+      } catch (e) {
+        const raw = (e && e.message) ? e.message : String(e)
+        // 原始错误可能是多行（带栈片段）⇒ 收敛成一行，便于摘要在任何终端里可读
+        const one = raw.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 2).join(' | ')
+        return '未能评测：' + m.rel + ' 解析失败（' + one + '）'
+      }
+    }
+    return null
+  } finally {
+    // ⚠️ 预检自己要收尾：它落的是**新造的**副本目录（不在 `runOnce` 的 `dirs` 台账里）。
+    //    早先版本漏了这一步 ⇒ 预检每跑一次就多留一个空目录（实测盘上曾积到 403 个 d-gpguard-*）。
+    for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch (e) { /* 略 */ } }
+  }
+}
+
+// 判据级三态（裁定 #64 第 2 条）：通过 / **不成立** / **未能确证**。
+// `deviceError` 与「装置抛异常」一律进 `unverified`，**不得**混进 `failures` 计数。
+// 结构（不是注释）：`judge()` 两个 return 点的 `unverified.length` 单独返回，调用方无论走哪条出口
+// 都先把 `unverified` 算进红（fail-closed）——「测不了」永不可能读成 PASS。
+function devName(c) {
+  return c.title ? c.id + '（装置：' + c.title + '）' : c.id
+}
+
+async function judge(sourceText, dedupText, label) {
+  const pre = await precheck(sourceText, dedupText)
+  if (pre) return {
+    device: true, notice: pre, failures: [], unverified: [], named: [],
+    // 摘要口径（裁定 #64 第 2 条）：预检没过 ⇒ 该次运行的**全部**判据都「未能确证」，
+    // 且点名必须来自判据表本身（不得用「装置抛异常」这种内部标签冒充判据名）。
+    unverifiedItems: CRITERIA.map(devName),
+  }
+  const failures = []
+  const unverified = []
+  const named = []
+  const run = makeRunner(sourceText, dedupText)
+  for (const c of CRITERIA) {
+    let r
+    PROBE_LOG.length = 0
+    try {
+      r = await c.fn(run)
+    } catch (e) {
+      unverified.push(c.id + '：装置抛异常 —— ' + (e && e.message ? e.message : String(e)))
+      named.push(devName(c))
+      if (probe) { console.log('  ' + c.id + ' 装置抛异常：' + (e && e.stack ? e.stack.split('\n').slice(0, 2).join(' | ') : String(e))) }
+      continue
+    }
+    if (probe) {
+      console.log('  ── ' + c.id + '（' + label + '）' + c.title)
+      for (const ln of PROBE_LOG) console.log(ln)
+      probeDump('判据返回', Array.isArray(r) ? r : (r && r.notes ? { notes: r.notes } : r))
+      console.log(PROBE_LOG[PROBE_LOG.length - 1] || '')
+    } else if (r && r.deviceError) {
+      unverified.push(c.id + '：装置没跑成 —— ' + r.deviceError)
+      named.push(devName(c))
+      continue
+    }
+    if (Array.isArray(r)) for (const f of r) failures.push(c.id + '：' + f)
+    else if (r && Array.isArray(r.notes)) { /* 通过，备注不打印（保持输出简洁） */ }
+  }
+  return { device: false, notice: null, failures, unverified, named, unverifiedItems: named }
+}
+
+// 摘要口径（裁定 #64 第 2 条）：两个计数**必须分开**且都写在摘要行里。
+// `named` 非空时逐条点名（如 `C1（装置：…）`）；为空则只给条数 —— 不给「未能确证 3 条」配三个假名字。
+function threeState(nFail, named, extraRaw) {
+  let s = '判据不成立 ' + nFail + ' 条 · 未能确证 ' + named.length + ' 条'
+  if (named.length) s += '（' + named.join(' / ') + '）'
+  if (extraRaw) s += ' · ' + extraRaw
+  return s
+}
 const globalSrc = fs.readFileSync(path.join(ROOT, TARGET_REL), 'utf8')
 const dedupSrc = fs.readFileSync(path.join(ROOT, DEDUP_REL), 'utf8')
 const sha16 = (s) => {
@@ -894,56 +1009,46 @@ console.log('  仓库 ' + ROOT)
 console.log('  被测文件 ' + TARGET_REL + ' · sha ' + sha16(globalSrc) + '…  ' + Buffer.byteLength(globalSrc) + ' B / ' + globalSrc.split('\n').length + ' 行')
 console.log('  被测文件 ' + DEDUP_REL + ' · sha ' + sha16(dedupSrc) + '…  ' + Buffer.byteLength(dedupSrc) + ' B / ' + dedupSrc.split('\n').length + ' 行')
 console.log('  判据条数 ' + CRITERIA.length + ' · 变异条数 ' + MUTATIONS.length + '（每条断言各配一次负向对照）')
-
-async function judge(sourceText, dedupText, label) {
-  const failures = []
-  const run = makeRunner(sourceText, dedupText)
-  for (const c of CRITERIA) {
-    let r
-    PROBE_LOG.length = 0
-    try {
-      r = await c.fn(run)
-    } catch (e) {
-      failures.push(c.id + '：装置抛异常 —— ' + (e && e.message ? e.message : String(e)))
-      if (probe) { console.log('  ' + c.id + ' 装置抛异常：' + (e && e.stack ? e.stack.split('\n').slice(0, 2).join(' | ') : String(e))) }
-      continue
-    }
-    if (probe) {
-      console.log('  ── ' + c.id + '（' + label + '）' + c.title)
-      for (const ln of PROBE_LOG) console.log(ln)
-      probeDump('判据返回', Array.isArray(r) ? r : (r && r.notes ? { notes: r.notes } : r))
-      console.log(PROBE_LOG[PROBE_LOG.length - 1] || '')
-    } else if (r && r.deviceError) {
-      failures.push(c.id + '：装置没跑成 —— ' + r.deviceError)
-      continue
-    }
-    if (Array.isArray(r)) for (const f of r) failures.push(c.id + '：' + f)
-    else if (r && Array.isArray(r.notes)) { /* 通过，备注不打印（保持输出简洁） */ }
-  }
-  return failures
-}
-
 console.log('')
 console.log('── 八条判据（加载真身跑；--selftest 时为基线）──')
-const baseFailures = await judge(null, null, 'base')
+const base = await judge(null, null, 'base')
+const baseFailures = base.failures
+const baseUnverified = base.unverified
+const baseUnproven = baseUnverified.length > 0
+const baseNotice = base.device ? base.notice : null
 for (const f of baseFailures) console.log('  FAIL  ' + f)
-const baseOk = baseFailures.length === 0
-console.log('  ' + (baseOk ? 'PASS' : 'FAIL') + '  基线（' + TARGET_REL + ' + ' + DEDUP_REL + '）：' + (baseOk ? CRITERIA.length + ' 条判据全绿' : baseFailures.length + ' 条不成立'))
+for (const u of baseUnverified) console.log('  FAIL  ' + u)
+const baseOk = baseFailures.length === 0 && !baseUnproven && !baseNotice
+const baseTail = baseNotice
+  ? baseNotice
+  : (baseOk
+    ? CRITERIA.length + ' 条判据全绿'
+    : threeState(baseFailures.length, base.named, null))
+// 裁定 #64 第 1 条还管**措辞**：预检没过时，这一行也**不得**出现 `FAIL` 标记 ——
+// 一条判据都没被评估过，任何 `FAIL` 前缀都会被读成「判据级结论」。用 `未能评测` 作独立标记。
+console.log('  ' + (baseNotice ? '未能评测' : (baseOk ? 'PASS' : 'FAIL')) + '  基线（' + TARGET_REL + ' + ' + DEDUP_REL + '）：' + baseTail)
 
 if (!selftest) {
   console.log('')
+  // 裁定 #64 第 1 条：预检没过 ⇒ 一条判据都没被评估过 ⇒ 只报「未能评测」，不报任何判据级结论。
+  if (baseNotice) {
+    console.error(baseNotice)
+    console.error('本门未能评测：被判对象在评测前就不可加载/解析 ⇒ 非「判据不成立」，也不是通过。')
+    process.exit(EXIT.DEVICE)
+  }
   if (baseOk) {
     console.log('本门成立：组段按 id 命中/启用门控、键序拼接块间空行、字面保真、路由 sessions 形状健壮、三段缓存互不误剔、去重范围含组段。')
     process.exit(EXIT.PASS)
   }
-  console.error('本门报红：' + baseFailures.length + ' 条判据不成立（见上）')
+  console.error('本门报红：' + threeState(baseFailures.length, base.named, null) + '（见上）')
   process.exit(EXIT.FAIL)
 }
 
-// ── 自证：基线 + 八份变异 ───────────────────────────────────────────────────
+// ── 自证：基线 + 九份变异 ───────────────────────────────────────────────────
 console.log('')
-console.log('── 自证（--selftest）：基线 + 八份变异，副本在 os.tmpdir() ──')
-let deviceFailures = 0
+console.log('── 自证（--selftest）：基线 + 九份变异，副本在 os.tmpdir() ──')
+let deviceFailures = 0        // 对照无效 / 连带翻转（内容异常）
+let unconfirmedMutations = 0  // 该次变异下有判据「未能确证」（装置抛异常 / 局部装置没跑成）
 let falsified = 0
 for (const m of MUTATIONS) {
   const isDedup = m.target === 'dedup'
@@ -954,14 +1059,20 @@ for (const m of MUTATIONS) {
     deviceFailures += 1
     continue
   }
-  const failures = isDedup
+  const res = isDedup
     ? await judge(globalSrc, r.text, m.id)
     : await judge(r.text, dedupSrc, m.id)
-  const hit = failures.some((f) => f.startsWith(m.crit + '：'))
+  const failures = res.failures
   const extra = failures.filter((f) => !f.startsWith(m.crit + '：'))
+  // 裁定 #64 第 2 条的结构（不是注释）：**同一次运行**里出现「未能确证」⇒ 该变异一律红，
+  // 不得因为「点名判据碰巧也红了」就把它读成合格对照（`hit` 与「测不了」是两件事）。
+  const hit = failures.some((f) => f.startsWith(m.crit + '：')) && res.unverified.length === 0
   console.log('  ' + m.id + '  ' + m.label)
   console.log('     字节 ' + Buffer.byteLength(src) + ' B → ' + Buffer.byteLength(r.text) + ' B（源码已不同 ✓）')
-  console.log('     点名判据 ' + m.crit + ' ⇒ ' + (hit ? '报红（符合预期）' : '**没有报红 ⇒ 这条断言是空的**'))
+  console.log('     点名判据 ' + m.crit + ' ⇒ ' + (hit ? '报红（符合预期）' : '**报红无效 ⇒ 这条断言这次不算数**'))
+  if (res.unverified.length) {
+    console.log('     FAIL  ' + threeState(0, res.unverifiedItems, null) + '（该次运行有判据测不了 ⇒ 这条对照不能算数）')
+  }
   if (!hit) {
     // 定位「空断言」必需：打印该判据在变异下的实际返回（含 notes），否则只能靠猜。
     const c = CRITERIA.find((x) => x.id === m.crit)
@@ -977,14 +1088,15 @@ for (const m of MUTATIONS) {
   }
   if (!hit) falsified += 1
   if (extra.length) deviceFailures += 1
+  if (res.unverified.length) unconfirmedMutations += 1
 }
 
 console.log('')
 console.log('── 自证汇总 ──')
 console.log('  基线：' + (baseOk ? '绿（符合预期）' : '红 —— **基线必须绿**'))
-console.log('  变异：' + MUTATIONS.length + ' 份 · 点名判据报红 ' + (MUTATIONS.length - falsified) + ' · 没报红 ' + falsified + ' · 对照无效/连带翻转 ' + deviceFailures)
-if (baseOk && falsified === 0 && deviceFailures === 0) {
-  console.log('本门成立：真实文件八条判据全绿，且八种破坏形态各自翻掉它点名的那条、不连带翻转别的。')
+console.log('  变异：' + MUTATIONS.length + ' 份 · ' + threeState(falsified, [], '对照无效/连带翻转 ' + deviceFailures + ' · 未能确证的变异 ' + unconfirmedMutations + ' 份'))
+if (baseOk && falsified === 0 && deviceFailures === 0 && unconfirmedMutations === 0) {
+  console.log('本门成立：真实文件八条判据全绿，且九份变异各自翻掉它点名的那条、不连带翻转别的。')
   console.log('（临时副本已删；工作区零写入）')
   process.exit(EXIT.PASS)
 }
