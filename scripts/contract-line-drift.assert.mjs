@@ -148,6 +148,29 @@ function expandNumbers(spec) {
 }
 
 /**
+ * 往前找第一个「被引文件真有改动块」的祖先基线（自检第二组/第四组共用）。
+ *
+ * 为什么不写死 `HEAD~1`：它是**相对裁判点**的，门前进一笔纯文档/门自身的提交就会让
+ * `HEAD~1..HEAD` 没有被引文件的改动 ⇒ 第二组的装置前提被提交历史换掉 ⇒ 真身读数退化。
+ * 找不到 ⇒ 抛错（**装置故障**，exit 2），绝不静默退化成同义反复。
+ *
+ * @returns {string} 形如 `HEAD~2`
+ */
+function findDiffBaseline() {
+  const forced = process.env.CLD_DIFF_BASELINE;
+  if (forced) return forced;
+  for (let d = 1; d <= 8; d += 1) {
+    try {
+      const rev = git(['rev-parse', `HEAD~${d}`]).trim();
+      const n = parseHunks(git(['diff', '--unified=0', '--no-color', '--no-ext-diff', rev, '--', 'client/client.js'])).length;
+      if (n > 0) return `HEAD~${d}`;
+    } catch { break; }
+  }
+  throw new Error('往前 8 个祖先里没有任何一笔对 client/client.js 有改动块'
+    + ' ⇒ 找不到「真有 diff 的基线」，装置不成立（请用 CLD_DIFF_BASELINE 指定一条）');
+}
+
+/**
  * 抽引用：只认**表格行**（trimStart 后以 `|` 开头）。
  *   (1) 带路径形 `<file>:<nums>`（确定口径）
  *   (2) 裸形 `<nums>`（启发式：归属「同行最近一个带路径引用」的文件）
@@ -314,7 +337,23 @@ function evaluate({ tablePath, baseline, refRoot = ROOT }) {
   for (const r of refs) {
     if (!inScope.includes(r.file)) continue; // 不在视野，另计
     const { map, baseLines, liveLines } = maps.get(r.file);
-    if (r.line > baseLines.length) { unmappable.push({ ...r, why: `超基线长度（${r.line} > ${baseLines.length}）` }); continue; }
+    if (r.line > baseLines.length) {
+      // 裁定 #71⑤(ii)：措辞必须区分两种**处置完全不同**的成因。
+      //   ① 超出**现盘**长度 ⇒ 表里的号是笔误/越界（该修表，是缺陷信号）
+      //   ② 没超现盘长度、只是超出**基线**那一版 ⇒ 基线之后被加进来的行（如某次提交新增的引用点）
+      //      ⇒ **不是笔误**，是「基线帧取旧了」的正常症状，别让人去改表
+      // 注：状态名仍叫 out-of-baseline（纯函数 map 的既有契约，自检第 401 行用例钉着它），
+      //     这里只把**人读的 why** 说清。
+      const beyondLive = r.line > liveLines.length;
+      unmappable.push({
+        ...r,
+        why: beyondLive
+          ? `越界/笔误：:${r.line} 连**现盘**都只有 ${liveLines.length} 行`
+          : `超基线长度：:${r.line} > 基线 ${baseLines.length} 行`
+            + `（**未**越现盘 ${liveLines.length} 行 ⇒ 疑似基线取旧、行号指向基线之后新增的代码，**不是**笔误）`,
+      });
+      continue;
+    }
     const res = map(r.line);
     if (res.state !== 'ok') { unmappable.push({ ...r, why: res.state }); continue; }
     // 证据层级（裁定 #71④b）：**映射是主判据**（陈旧/同由行号映射判定），
@@ -553,10 +592,30 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   //   若 baseline 与工作区逐字相同，`git diff` 一个块都没有 ⇒ 陈旧结构上不可能出现。
   //   故这一组用 baseline=TARGET_BASELINE（默认 HEAD）跑一次「不得凭空报红」，
   //   再**额外**用 prevBaseline（默认 HEAD~1）跑一次「必须真报红」。
-  const prevBaseline = process.env.CLD_PREV_BASELINE || 'HEAD~1';
+  //
+  // ⚠ **不要把基线写死成 HEAD~1**（我踩过，两次同型）：`HEAD~1` 是相对裁判点，一旦有人
+  //   在门前进了一笔纯文档/门自身的提交，`HEAD~1..HEAD` 就**没有**被引文件的改动块 ⇒
+  //   「真有 diff 的基线」这个装置前提**被提交历史换掉了** ⇒ 真身读数退化成「陈旧 0 / PASS」。
+  //   故这里**自动往前找**第一个「被引文件真有改动块」的祖先基线，找不到就报**装置故障**，
+  //   绝不静默退化成同义反复。
+  // 环境变量 CLD_DIFF_BASELINE 可指定一条确定基线（覆盖自动探测）。
+  let prevBaseline = process.env.CLD_DIFF_BASELINE || null;
+  if (!prevBaseline) {
+    for (let d = 1; d <= 8 && !prevBaseline; d += 1) {
+      try {
+        const rev = git(['rev-parse', `HEAD~${d}`]).trim();
+        const n = parseHunks(git(['diff', '--unified=0', '--no-color', '--no-ext-diff', rev, '--', 'client/client.js'])).length;
+        if (n > 0) prevBaseline = `HEAD~${d}`;
+      } catch { break; }
+    }
+  }
   let prevOk = false;
   casesRun += 1;
   try {
+    if (!prevBaseline) {
+      throw new Error('往前 8 个祖先里没有任何一笔对 client/client.js 有改动块'
+        + ' ⇒ 找不到「真有 diff 的基线」，本组装置**不成立**（请用 CLD_DIFF_BASELINE 指定）');
+    }
     const prevRes = evaluate({ tablePath, baseline: prevBaseline, refRoot });
     prevOk = prevRes.exit === 1 && prevRes.stale.length > 0;
     out.push(`  ${prevOk ? 'PASS' : 'FAIL'} 真身 · 基线 ${prevBaseline}（真有 diff）⇒ 必须报红且给出现应指向`);
@@ -723,7 +782,7 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   {
     const copy = join(dir, 'frame-warn.md');
     writeFileSync(copy, original);
-    const prevBaseline = process.env.CLD_PREV_BASELINE || 'HEAD~1';
+    const prevBaseline = findDiffBaseline() // 与第二组同一真源：不写死 HEAD~1;
     const checks = [];
     const renderQuietly = (bl) => {
       const r = evaluate({ tablePath: copy, baseline: bl, refRoot });
