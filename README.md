@@ -4,7 +4,7 @@
 
 A consolidated plugin toolkit for the **DeepSeek Harness**. Five previously separate local plugins — **session identity**, **global prompt**, **session auto-resume**, **Session-log button relocation**, and **peer-session messaging** — merged into a single installable package that ships in the official bundle form (`dsh.bundle.patch`) and installs with `dsh plugin add`; it also includes a **Prompt Dedup** feature.
 
-Current version: **0.1.13**, verified against **DeepSeek Harness `dsh-v0.1.7-alpha.1`** — which is also its **minimum supported version** — and **re-verified on `dsh-v0.1.7-rc.1`** (**contract surfaces + the full gate suite — not a complete functional regression**): 0.1.6 and earlier fail loudly by design rather than degrading silently (see [Compatibility](#compatibility)).
+Current version: **0.1.14**, verified against **DeepSeek Harness `dsh-v0.1.7-alpha.1`** — which is also its **minimum supported version** — and **re-verified on `dsh-v0.1.7-rc.1`** (**contract surfaces + the full gate suite — not a complete functional regression**): 0.1.6 and earlier fail loudly by design rather than degrading silently (see [Compatibility](#compatibility)).
 
 ---
 
@@ -209,9 +209,9 @@ pnpm verify   # + packaging contract — entry reachability, undeclared imports,
 
 ### Share & Install
 
-Published on **npm** as `dsh-session-toolkit` (**latest published version: v0.1.13**, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
+Published on **npm** as `dsh-session-toolkit` (**latest published version: v0.1.14**, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
 
-> **npm carries the current version.** `0.1.13` is published, so `dsh plugin --profile web add dsh-session-toolkit` gives you the session-management tools (`create_session` / `rename_session`) and everything else described above. `0.1.9` and `0.1.10` were tagged but never reached npm; `0.1.11` was the first published version since `0.1.8`. Installing from this checkout or from GitHub (`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`) is equivalent.
+> **npm carries the current version.** `0.1.14` is published, so `dsh plugin --profile web add dsh-session-toolkit` gives you the session-management tools (`create_session` / `rename_session`) and everything else described above. `0.1.9` and `0.1.10` were tagged but never reached npm; `0.1.11` was the first published version since `0.1.8`. Installing from this checkout or from GitHub (`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`) is equivalent.
 
 - **npm**: consumers run `dsh plugin --profile web add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
 - **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.

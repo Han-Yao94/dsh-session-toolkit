@@ -4,7 +4,7 @@
 
 DeepSeek Harness 的整合插件工具箱。将先前 5 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
 
-当前版本:**0.1.13**,已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证——它同时是**最低支持版本**——并在 **`dsh-v0.1.7-rc.1`** 上**重新验证过**(**契约面 + 全套门,非完整功能回归**):0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
+当前版本:**0.1.14**,已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证——它同时是**最低支持版本**——并在 **`dsh-v0.1.7-rc.1`** 上**重新验证过**(**契约面 + 全套门,非完整功能回归**):0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
 
 ---
 
@@ -236,9 +236,9 @@ pnpm verify   # 另加打包契约 —— 入口可达、import 声明完整、�
 
 ### 分享与安装
 
-已发布至 **npm**(`dsh-session-toolkit`,**最新已发布版本 v0.1.13**,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+已发布至 **npm**(`dsh-session-toolkit`,**最新已发布版本 v0.1.14**,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
 
-> **npm 上就是当前版本。** `0.1.13` 已发布,因此 `dsh plugin --profile web add dsh-session-toolkit` 即可得到上文介绍的会话管理工具(`create_session` / `rename_session`)及其余全部功能。`0.1.9` 与 `0.1.10` 打过 tag 但从未进入 npm;`0.1.11` 是 `0.1.8` 之后第一个真正发布的版本。从本 checkout 或 GitHub 安装(`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`)等价。
+> **npm 上就是当前版本。** `0.1.14` 已发布,因此 `dsh plugin --profile web add dsh-session-toolkit` 即可得到上文介绍的会话管理工具(`create_session` / `rename_session`)及其余全部功能。`0.1.9` 与 `0.1.10` 打过 tag 但从未进入 npm;`0.1.11` 是 `0.1.8` 之后第一个真正发布的版本。从本 checkout 或 GitHub 安装(`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`)等价。
 
 - **npm**:消费者 `dsh plugin --profile web add dsh-session-toolkit` 安装;新版本通过 `npm publish`(或 `pnpm publish`)发布。
 - **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
