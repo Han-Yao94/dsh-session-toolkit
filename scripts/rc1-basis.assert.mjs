@@ -62,7 +62,7 @@
  *      同一份并集声明 npm 选 rc1、pnpm 选 0.1.7-rc.2，见 `board/a.md` §252.3）
  *
  * 用法：
- *   node scripts/rc1-basis.assert.mjs --base <rc1基座> [--alpha-base <对照基座>] [--verbose]
+ *   node scripts/rc1-basis.assert.mjs --base <rc1基座> [--alpha-base <对照基座>] [--verbose] [--timeout <秒>]
  *   node scripts/rc1-basis.assert.mjs --selftest        # 真调自身，四条断言各配会失败的负对照
  *   node scripts/rc1-basis.assert.mjs --help
  */
@@ -75,6 +75,14 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const EXIT = { PASS: 0, FAIL: 1, INCOMPLETE: 3, USAGE: 64 }
+
+/**
+ * 单条命令的超时（毫秒）。**这是标定值，不是玄学**：`verify.selftest.mjs` 要在基座里逐文件
+ * 哈希整棵树两遍，实测在同一台机上 41 秒～1099 秒（冷启动 + 磁盘压力下；见 §100-D 原始读数）。
+ * 原来写死 300 秒 ⇒ 慢机/冷盘上会**被门自己掐断**，而对拍又把两侧都超时误读成
+ * 「对依赖版本敏感」判红。现默认抬到 600 秒，并给 `--timeout <秒>` 旋钮，CI 慢机可再放宽。
+ */
+let RUN_TIMEOUT_MS = 600000
 
 /** rc1 一线的五个包：本门要求它们**版本齐一且不带 alpha 后缀**。 */
 const RC1_PKGS = [
@@ -97,6 +105,7 @@ const usage = (out = console.error) => {
   out('  --base <dir>        rc1 基座（已装好钉版依赖的树；本门只读它）')
   out('  --alpha-base <dir>  对照基座（alpha.1 树）；给了就执行 D 断言，**少了它 D 判前置不成立（3）**')
   out('  --commands <list>   覆盖命令清单（逗号分隔；缺省=从工作流与 package.json 现场抽取）')
+  out('  --timeout <秒>      单条命令超时（缺省 600 秒；慢机可放宽，两侧都超时的命令记「未完成」不判红）')
   out('  --selftest          真调自身，四条断言各配一条会失败的负对照')
   out('  --verbose           打印每条命令的读数与归一化摘要')
   out('  --help              打印本帮助')
@@ -119,6 +128,13 @@ for (let i = 0; i < argv.length; i += 1) {
   if (a === '--base') { const v = argv[i + 1]; if (v === undefined || v.startsWith('--')) { console.error('`--base` 需要一个目录'); process.exit(EXIT.USAGE) } base = v; i += 1 }
   else if (a === '--alpha-base') { const v = argv[i + 1]; if (v === undefined || v.startsWith('--')) { console.error('`--alpha-base` 需要一个目录'); process.exit(EXIT.USAGE) } alphaBase = v; i += 1 }
   else if (a === '--commands') { const v = argv[i + 1]; if (v === undefined || v.startsWith('--')) { console.error('`--commands` 需要一个逗号分隔的命令清单'); process.exit(EXIT.USAGE) } commandsOverride = v.split(',').map((s) => s.trim()).filter(Boolean); i += 1 }
+  else if (a === '--timeout') {
+    const v = argv[i + 1]
+    if (v === undefined || v.startsWith('--')) { console.error('`--timeout` 需要秒数'); process.exit(EXIT.USAGE) }
+    const sec = Number(v)
+    if (!Number.isFinite(sec) || sec <= 0) { console.error(`\`--timeout\` 需要正数秒（收到 ${JSON.stringify(v)}）`); process.exit(EXIT.USAGE) }
+    RUN_TIMEOUT_MS = Math.round(sec * 1000); i += 1
+  }
   else if (a === '--selftest') { selftest = true }
   else if (a === '--verbose') { verbose = true }
   else { console.error(`未知参数：${a}`); usage(); process.exit(EXIT.USAGE) }
@@ -130,7 +146,7 @@ const say = (s) => process.stdout.write(`${s}\n`)
 const log = (s) => { if (verbose) process.stdout.write(`    ${s}\n`) }
 
 /** 跑一条命令（`node <args>`），cwd 指定在基座里；**用 spawnSync 的 status，不碰管道退出码**。 */
-function run (cwd, args, timeout = 300000) {
+function run (cwd, args, timeout = RUN_TIMEOUT_MS) {
   const r = spawnSync(process.execPath, args, { cwd, encoding: 'utf8', timeout, env: { ...process.env } })
   return { status: r.status === null ? 'TIMEOUT' : r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, error: r.error?.code ?? null }
 }
@@ -249,8 +265,15 @@ function assertSentinel (baseDir, commands) {
 }
 
 // ── 断言 D：两基座输出对拍（差异 ⇒ 判红）──────────────────────────────────
+/**
+ * 对拍。**超时不混进「差异」里**（§100-D 实测踩到的假差异）：
+ *  - 一方超时、另一方没超时 ⇒ status 本来就不同 ⇒ 照旧算**差异（判红）**；
+ *  - 双方都超时 ⇒ 对拍没比到任何东西（谁快谁慢与依赖版本无关），这一条**不计入差异**，
+ *    但**记成「未完成」（EXIT 3）**——不许被读作通过（skip 不与「通过」同形）。
+ */
 function assertDifferential (rc1Dir, alphaDir, commands) {
   const diffs = []
+  const timeouts = []
   const normalized = {}
   for (const cmd of commands) {
     const [file, ...rest] = cmd.split(/\s+/)
@@ -258,17 +281,27 @@ function assertDifferential (rc1Dir, alphaDir, commands) {
     const b = run(alphaDir, [file, ...rest])
     const na = normalizeOutput(a.out, [rc1Dir, alphaDir])
     const nb = normalizeOutput(b.out, [alphaDir, rc1Dir])
-    normalized[cmd] = { rc1: na, alpha: nb }
-    if (a.status !== b.status || na !== nb) diffs.push({ cmd, statusRc1: a.status, statusAlpha: b.status, same: na === nb })
-    log(`D ${a.status === b.status && na === nb ? '同 ' : '异 '} ${cmd}`)
+    normalized[cmd] = { rc1: na, alpha: nb, statusRc1: a.status, statusAlpha: b.status }
+    if (a.status === 'TIMEOUT' && b.status === 'TIMEOUT') timeouts.push({ cmd, statusRc1: a.status, statusAlpha: b.status })
+    else if (a.status !== b.status || na !== nb) diffs.push({ cmd, statusRc1: a.status, statusAlpha: b.status, same: na === nb })
+    log(`D ${a.status === b.status && na === nb ? '同 ' : a.status === 'TIMEOUT' && b.status === 'TIMEOUT' ? '超时(不计异) ' : '异 '} ${cmd}`)
   }
-  if (diffs.length === 0) return { ok: true, detail: `${commands.length}/${commands.length} 条归一化后一致（0 条对依赖版本敏感）`, normalized }
-  return { ok: false, why: `有 ${diffs.length} 条对依赖版本敏感 ⇒ 判红（裁定 #rc1-D-2②）：${diffs.map((d) => `${d.cmd}（status ${d.statusRc1} vs ${d.statusAlpha}${d.same ? '' : ' · 输出不同'}）`).join(' || ')}`, diffs, normalized }
+  const detail = `${commands.length - timeouts.length}/${commands.length} 条归一化后一致（${diffs.length} 条对依赖版本敏感；${timeouts.length} 条两侧都超时＝未对拍）`
+  if (diffs.length === 0 && timeouts.length === 0) return { ok: true, detail: `${commands.length}/${commands.length} 条归一化后一致（0 条对依赖版本敏感）`, normalized }
+  if (diffs.length === 0) {
+    return {
+      ok: false,
+      incomplete: true,
+      why: `${timeouts.length} 条命令**两侧都被超时掐断**（未对拍 ⇒ 未完成验证，不得读作通过）：${timeouts.map((d) => d.cmd).join(' · ')}。当前单条超时 = ${RUN_TIMEOUT_MS / 1000} 秒，慢机可用 \`--timeout <秒>\` 放宽`,
+      timeouts, normalized, detail,
+    }
+  }
+  return { ok: false, why: `有 ${diffs.length} 条对依赖版本敏感 ⇒ 判红（裁定 #rc1-D-2②）：${diffs.map((d) => `${d.cmd}（status ${d.statusRc1} vs ${d.statusAlpha}${d.same ? '' : ' · 输出不同'}）`).join(' || ')}${timeouts.length > 0 ? ` ｜ 另有 ${timeouts.length} 条两侧都超时（未对拍，已一并记入未完成）` : ''}`, diffs, timeouts, normalized, incomplete: timeouts.length > 0 }
 }
 
 // ── 主流程（四条断言，各自独立判红；3 优先于 1 记账）───────────────────────
 function runAll ({ baseDir, alphaDir, commands }) {
-  const report = { assertions: {}, exit: EXIT.PASS }
+  const report = { assertions: {}, exit: EXIT.PASS, timeoutMs: RUN_TIMEOUT_MS }
   say(`rc1 基座门 · 基座 = ${baseDir}`)
   say(`            对照基座 = ${alphaDir ?? '（未给 ⇒ D 断言前置不成立）'}`)
 
@@ -310,12 +343,13 @@ function runAll ({ baseDir, alphaDir, commands }) {
 }
 
 // ── selftest：真调自身，四条断言各配一条**会失败**的负对照 ──────────────────
-function makeFixtureTree (dir, { versions, autoResumeExit = 0, cmdExit = {} }) {
+function makeFixtureTree (dir, { versions, autoResumeExit = 0, cmdExit = {}, cmdSource = {} }) {
   mkdirSync(path.join(dir, 'scripts'), { recursive: true })
   mkdirSync(path.join(dir, '.git'), { recursive: true })
   writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ name: 'fixture', version: '0.0.0', scripts: {} }, null, 2)}\n`)
-  writeFileSync(path.join(dir, 'scripts/local-cmd.mjs'), `process.exit(${cmdExit['scripts/local-cmd.mjs'] ?? 0})\n`)
-  writeFileSync(path.join(dir, 'scripts/second-cmd.mjs'), `process.exit(${cmdExit['scripts/second-cmd.mjs'] ?? 0})\n`)
+  for (const f of [ 'scripts/local-cmd.mjs', 'scripts/second-cmd.mjs' ]) {
+    writeFileSync(path.join(dir, f), cmdSource[f] ?? `process.exit(${cmdExit[f] ?? 0})\n`)
+  }
   writeFileSync(path.join(dir, 'scripts/auto-resume.contract.selftest.mjs'),
     `console.log('共 ${AUTO_RESUME_TOTAL} 条：通过 ${AUTO_RESUME_TOTAL - autoResumeExit}，失败 ${autoResumeExit}')\nprocess.exit(${autoResumeExit === AUTO_RESUME_TOTAL ? EXIT.INCOMPLETE : autoResumeExit > 0 ? EXIT.FAIL : EXIT.PASS})\n`)
   for (const [pkg, ver] of Object.entries(versions)) {
@@ -374,6 +408,22 @@ function selftestMain () {
   const badD = path.join(tmpRoot, 'neg-d-diff'); makeFixtureTree(badD, { versions: RC1, cmdExit: { 'scripts/second-cmd.mjs': 1 } })
   note('负对照 D：alpha 树里同一条命令退 1 ⇒ 对拍必须抓到', EXIT.FAIL, runSelf([ '--base', good, '--alpha-base', badD, '--commands', cmds.join(',') ]))
   note('负对照 D′：没给 --alpha-base（对拍无对照）', EXIT.INCOMPLETE, runSelf([ '--base', good, '--commands', cmds.join(',') ]))
+
+  // ⚠ 这一组是 §100-D 实测踩出来的**假差异**：两侧都被超时掐断时，归一化后的残输出不同
+  //   ⇒ 旧版把「两侧同样没跑成」读成「对依赖版本敏感」判红。skip 绝不与「通过」同形：
+  //   两侧都超时 ⇒ 记「未完成」（3），既不许读作通过，也不许冒充「发现了版本敏感」。
+  say('=== 超时口径：两侧都超时 ⇒ 未完成（3，不判红）；只有一侧超时 ⇒ 真差异（1）===')
+  const slowBothA = path.join(tmpRoot, 'neg-d-slow-both-a'); makeFixtureTree(slowBothA, { versions: RC1, cmdSource: { 'scripts/second-cmd.mjs': 'setTimeout(() => {}, 3000)\n' } })
+  const slowBothB = path.join(tmpRoot, 'neg-d-slow-both-b'); makeFixtureTree(slowBothB, { versions: ALPHA, cmdSource: { 'scripts/second-cmd.mjs': 'setTimeout(() => {}, 3000)\n' } })
+  note('超时：两侧同一条命令都超时 ⇒ 3（未对拍，不得读作通过；旧版这里误判成 1）', EXIT.INCOMPLETE,
+    runSelf([ '--base', slowBothA, '--alpha-base', slowBothB, '--commands', cmds.join(','), '--timeout', '1' ]))
+  const slowOneB = path.join(tmpRoot, 'neg-d-slow-one-b'); makeFixtureTree(slowOneB, { versions: ALPHA, cmdSource: { 'scripts/second-cmd.mjs': 'setTimeout(() => {}, 3000)\n' } })
+  note('超时：只有 alpha 侧超时 ⇒ 1（status 不同＝真差异；「未完成」不得吞掉真差异）', EXIT.FAIL,
+    runSelf([ '--base', good, '--alpha-base', slowOneB, '--commands', cmds.join(','), '--timeout', '1' ]))
+  note('`--timeout` 旋钮：给 5 秒时夹具里没有命令超时 ⇒ 0（证明该旋钮真传到了 run）', EXIT.PASS,
+    runSelf([ '--base', good, '--alpha-base', alpha, '--commands', cmds.join(','), '--timeout', '5' ]))
+  note('`--timeout` 用法错：给 0 秒（非正数）⇒ 64', EXIT.USAGE,
+    runSelf([ '--base', good, '--alpha-base', alpha, '--commands', cmds.join(','), '--timeout', '0' ]))
 
   say('=== 装置自保：清单抽不出来 / 基座不像仓库树 ⇒ 必须非 0（不许静默跳过）===')
   note('自保：基座不存在', EXIT.INCOMPLETE, runSelf(withAlpha(path.join(tmpRoot, 'no-such-dir'))))

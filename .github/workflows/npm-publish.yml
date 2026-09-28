@@ -313,6 +313,86 @@ jobs:
           node-version: 20
       - run: node scripts/group-new-submit.assert.mjs --selftest
 
+  # ── rc1 基座门（`scripts/rc1-basis.assert.mjs`）· 裁定 #rc1-D-8（BL-073 = 挂）────────
+  # 为什么它**能**在 CI 里跑（沿用 `:250`/`:289` 两条的判据：该上下文里红是否可达/可被合理驳回）
+  #  ① 前置全公开可解析：rc1 基座就是本仓自带的 `pnpm-lock.yaml` 钉出来的那套
+  #     （`--frozen-lockfile`，**不改 `package.json` 一个字节**）；alpha 对照基座靠
+  #     `pnpm-workspace.yaml` 的 `overrides:` 注入版本（`package.json` 同样逐位不变
+  #     ⇒ 两棵树的 §0 锚表各自自洽、`package.json` 的 hash 相同 ⇒ D 对拍不被 manifest 差异污染）。
+  #     ⚠️ 这两条是 D 实测出来的**前提**，不是设计偏好：钉 `package.json` 会让发布树的锚门必红
+  #        （`package.json` 是 §0 登记项），而 D 会把它读成"版本敏感"⇒ 测量被污染。
+  #  ② 属**契约门**：四条断言（A 解析面 / B auto-resume 契约 / C 既有命令哨兵 / D 两基座对拍）
+  #     的红都只有一个动作（修），没有"这次可以放过"的合法理由 ⇒ 挂进 `publish-npm.needs`。
+  #     ⚠️ D 的红 = 「某条既有命令的输出对依赖版本敏感」，真出现过（`docs/agents/board/d.md` §96-D
+  #        点到 `anchor` 与 `auto-resume` 两条）。这类红**必须有人看**，不许静默。
+  #  ③ 退出码语义（门头部注释）：`0` 全成立 · `1` 有断言不成立 · `3` 前置不成立（未完成验证，
+  #     不得读作通过）· `64` 用法错。**3 也算失败**（fail-closed：CI 里没有人工，取不到读数
+  #     就等于没验证 —— 这是门的既有语义，本 job 不改它）。
+  # 基座怎么来（三步，与门头部注释一致）：clone 本仓（`.git` 要完整 ⇒ 本 job `fetch-depth: 0`）
+  #   → 装依赖（rc1 冻结锁；alpha 用 overrides 重解一次）→ 两者都提交成**干净提交树**。
+  #   ⚠️ alpha 基座必须**用 `--amend`、不增提交数**：`auto-resume` 门会打印「全史（N 个提交）」，
+  #      两侧提交数不等会造出**假差异** ⇒ D 误判红（D 本轮实测踩过，故 step 里 `diff -q` 自证
+  #      manifest 逐位相同，并打印两侧提交数供日志留痕）。
+  rc1-basis:
+    name: rc1 基座门（跨代版本组合 + 既有命令哨兵）
+    runs-on: ubuntu-latest
+    # 上界 90 分钟（裁定 #rc1-D-9①）：本机真树实测 wall = 2068 秒（约 34.5 分钟，含两棵树 × 20 条命令
+    # 各跑一遍），CI runner 通常更慢 ⇒ 取约 2.4× 余量。这个值是**上界**，不是期望耗时；
+    # 单条命令的超时另有 --timeout（见下），两者是不同层级：这条管整个 job，那条管一条命令。
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 建 rc1 基座（LOCKFILE-FROZEN）
+        run: |
+          set -euo pipefail
+          BASE="${RUNNER_TEMP}/rc1-base"
+          STORE="${RUNNER_TEMP}/rc1-store"
+          git clone --no-hardlinks --quiet . "$BASE"
+          cd "$BASE"
+          pnpm install --frozen-lockfile --ignore-scripts --store-dir "$STORE"
+          echo "rc1 基座提交数=$(git rev-list --count HEAD)"
+
+      - name: 建 alpha 对照基座（WORKSPACE-OVERRIDES）
+        run: |
+          set -euo pipefail
+          ALPHA="${RUNNER_TEMP}/rc1-alpha"
+          STORE="${RUNNER_TEMP}/rc1-store"
+          git clone --no-hardlinks --quiet . "$ALPHA"
+          cd "$ALPHA"
+
+          cat >> pnpm-workspace.yaml <<'YAML'
+          overrides:
+            "@deepseek-ai/dsh-home-paths": 0.1.7-alpha.1
+            "@deepseek-ai/dsh-tools": 0.1.7-alpha.1
+            "@deepseek-ai/dsh-client-locale": 0.1.7-alpha.1
+            "@deepseek-ai/dsh-client-store": 0.1.7-alpha.1
+            "@deepseek-ai/dsh-client-ui-primitives": 0.1.7-alpha.1
+            "@deepseek-ai/cordis": 4.0.3
+            "@deepseek-ai/schemastery": 3.18.3
+          YAML
+
+          pnpm install --ignore-scripts --store-dir "$STORE"
+
+          git -c user.name=ci -c user.email=ci@local commit --quiet -a --amend --no-edit
+          git status --porcelain
+
+          diff -q package.json "${RUNNER_TEMP}/rc1-base/package.json"
+          echo "alpha 基座提交数=$(git rev-list --count HEAD)"
+
+      - name: rc1 基座门（四条断言）
+        run: |
+          set -o pipefail
+          node scripts/rc1-basis.assert.mjs \
+            --base "${RUNNER_TEMP}/rc1-base" \
+            --alpha-base "${RUNNER_TEMP}/rc1-alpha" \
+            --timeout 1800 \
+            --verbose 2>&1 | tee "${RUNNER_TEMP}/rc1-basis.log"
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
@@ -326,7 +406,14 @@ jobs:
     #     （对照：`:46 dependency-skew.measure.mjs --selftest` 与 `:47 dsh-log-ui.drift.mjs --selftest`
     #      确实在 `selftest` job 里跑 —— 它们是**不需要外部 checkout**的自证步骤；本条之所以例外在
     #      「不进任何步骤」，理由是上面的"可被合理驳回"，与它们能否在 CI 跑无关。）
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, prompt-contract-assert, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert, session-picker-assert, group-new-submit-assert]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, prompt-contract-assert, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert, session-picker-assert, group-new-submit-assert, rc1-basis]
+      # ⚠️ `rc1-basis` **加入 needs**（D 的判断，裁定 #rc1-D-8 授权范围内）：判据同上「红是否可被
+      #   合理驳回」。它的四种红都不可驳回 —— ①解析到 alpha 线（跨代组合）②基座里既有命令有红的
+      #   ③两基座对拍出现差异 ④取不到读数（EXIT 3，fail-closed）。③ 尤其：某条命令的输出对依赖
+      #   版本敏感，正是「宿主换了、插件没跟上」这类静默断裂的信号，与 §0 那条教训同源
+      #   （"静默的契约断裂曾被发布出去"）。代价是发布可能被挡住一次，收益是挡不住的回归不会
+      #   被发出去 —— 两者不对称，故选挡。若某次红确属环境（registry 抖动导致 EXIT 3），
+      #   重跑 Release 即可，不需要改门。
     # ⚠️ `request-guard` **加入 needs**（D 的判断；按上面的分界判据，它是契约门而非探测器，故不冲突）：
     #   判据同上：**红是否可被合理驳回**。
     #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），
