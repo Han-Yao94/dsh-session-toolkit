@@ -43,6 +43,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
+import { createHash } from 'node:crypto';
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const TABLE = 'docs/agents/integration-contracts.md';
@@ -184,32 +185,152 @@ function extractRefs(tableText) {
     const tableLine = i + 1;
     if (!raw.trimStart().startsWith('|')) return;
 
-    let lastFile = null;
+    // ⚠ 单元格边界（2026-09-28 实测撞出，**这是本门最要紧的一条口径**）：
+    //   裸形号的归属必须是「**同格**内、最近的带路径引用」，不能跨格继承。
+    //   实测误报：表:62 第三格的 `` `:287` ``/`` `:362` `` 被算到**行尾那一格**的
+    //   `README.zh.md` 名下并报「越界/笔误」；真身是同一格里的
+    //   `dsh-agent/lib/types/index.d.ts:139` 的续列号 —— 一个彻底的误报。
+    //   有跨格继承时真表 26 条「越界/笔误」，全部是这一类；不修则本门天天误判作者。
+    //   实现：按未被转义的 `|` 切格，记下每格的字符区间；命中位置 index 落在哪一格即该格。
+    //   ⚠ 两条自证（我踩过的坑就藏在这里）：
+    //     (a) `stripped` 必须与 `raw` **等长且位置对齐**（replace 用等长空格），否则 index 不可比；
+    //     (b) 第一趟 PATH_FORM 在 `raw` 上跑、第二趟 BARE 在 `stripped` 上跑 —— 只要 (a) 成立，
+    //         两者的 index 空间就是同一个，可以共用 cellMap 与 lastBareCell。
+    //     我先前的实现漏了 (a)(b) 的对齐自证，导致同格号被判成跨格 ⇒ 归属被清空成 null。
+    const cellMap = [];
+    {
+      const CELL = /(?:^|[^\\])\|/g;
+      let prevEnd = null;
+      let cm;
+      while ((cm = CELL.exec(raw)) !== null) {
+        if (prevEnd !== null) cellMap.push([prevEnd, cm.index]);
+        prevEnd = cm.index + cm[0].length;
+      }
+      cellMap.push([prevEnd, raw.length]);
+    }
+    // ⚠ 死码（2026-09-28 复核）：归属改为**逐位归属槽** + `ownerAt` 之后，本函数与 `cellMap`
+    //   都不再被任何地方调用（`grep -n 'cellOf(' ` 只剩这一处定义）。留着是为了让下文那段
+    //   「我曾用格内查表算归属、实测 stripped 与 raw 不等长 ⇒ 整体错位」的记录有可对照的实物。
+    const cellOf = (idx) => {
+      for (let k = 0; k < cellMap.length; k += 1) if (idx >= cellMap[k][0] && idx < cellMap[k][1]) return k;
+      return -1;
+    };
+
     for (const m of raw.matchAll(PATH_FORM)) {
       const file = m[1];
-      lastFile = file;
       for (const n of expandNumbers(m[2])) {
         if (n.reversed) reversedRanges.push({ tableLine, file, form: 'path', text: n.reversed });
         else refs.push({ tableLine, file, line: n.n, form: 'path', expanded: n.fromRange });
       }
     }
 
+    // ⚠ 归属分界（2026-09-28 实测撞出的**误归属**，根因就在这两趟之间）：
+    //   表:62 的 `:362` 被算到**行尾那一格**的文件头（`README.zh.md`）名下并报「越界/笔误」，
+    //   而它其实是第三格 `dsh-agent/lib/types/index.d.ts` 的续列号 —— 一个彻底的误报。
+    //   ⇒ 归属不能**跨格**继承：BARE 这趟必须用**独立**变量从 null 起算，不得复用上面那趟的残值。
+    // ⚠ ⚠ 这里踩过一次坑（记下来）：只写 `lastFile = null` 而上面声明的是 `let lastFile` ⇒
+    //   两趟共用**同一个变量**，第二行起「清空」又把第一趟的结果抹掉，
+    //   于是**同一格内**的 `` `lib/peer-message.js:140` `` 之后跟的 `` `:2741-2671` `` 也归不到属
+    //   （明细里打印 `null`）。故引入 `lastFileBare`：两个名字必须不同。
+    //   两个名字必须不同，这一条本身也有负向对照（自检第五组考「有归属的裸形降序」必红）。
+    //   ⚠ 对齐自证（我先前的实现就栽在这里）：`stripped` 必须与 `raw` **等长且逐位对齐**，
+    //     且 BARE 的归属**不能**去查「第一趟留下的 cell」—— 两趟分别在 raw / stripped 上跑，
+    //     一旦 index 空间错位，同格号会被判成跨格、归属被清成 null（表:62 的 `:287` 就这样丢了）。
+    //     现在改为**一次构造**：边生成 stripped 边记 stride，位置与归属同一趟产出，不存在错位。
+    //   ⚠ 归属槽（**又一次**修正，2026-09-28 自检第五组逼出来的）：我先前用「命中 index 落在哪一格 +
+    //     该格内前面有哪个路径引用」来算归属，靠的是「stripped 与 raw 逐位对齐」这个**推理出来的**前提。
+    //     实测它不成立：最小表 `` | `lib/peer-message.js:140` | 原写 `:2741-2671` 降序 | `` 里
+    //     stripped 比 raw 长 7 个字符 ⇒ 归属查表整体错位、owner 退化成 null（自检「有归属的裸形降序」必红）。
+    //     ⇒ 不再做任何 index 换算：**一次构造** stripped，同时逐位写出 owner 槽
+    //       （带路径引用文本逐位写文件名，其余写 ''）。`ownerAt(idx)` 变成 O(1) 直查，
+    //       且**逐位与 stripped 对齐**，位置错位这件事在结构上不可能再发生。
+    //     自证改成「替身的长度 = 真身长度」——装置一旦长度对不上就当场抛（EXIT 2），绝不静默退化。
+    const PATH_FORM_ALL = /(?<![\w.\/-])([\w.\/-]+\.[a-z]{1,4}):((?:\d+(?:\s*[-–—]\s*\d+)?)(?:\s*[,，]\s*\d+(?:\s*[-–—]\s*\d+)?)*)/g;
     const stripped = raw.replace(PATH_FORM, (s) => ' '.repeat(s.length));
-    const BARE = /(?:^|[\s|(（,、])(\d{1,5}(?:\s*[-–—]\s*\d{1,5})?(?:\s*[,，]\s*\d{1,5}(?:\s*[-–—]\s*\d{1,5})?)*)(?=$|[\s|)）,、.。;；])/g;
+    const ownerSlot = new Array(stripped.length).fill('');
+    const oneChar = new Array(stripped.length).fill('');
+    for (const m of raw.matchAll(PATH_FORM_ALL)) {
+      for (let k = m.index; k < m.index + m[0].length && k < ownerSlot.length; k += 1) ownerSlot[k] = m[1];
+      for (let k = m.index; k < m.index + m[0].length && k < oneChar.length; k += 1) oneChar[k] = m[1];
+    }
+    if (process.env.CLD_SELFCHECK && ownerSlot.length !== stripped.length) {
+      throw new Error(`装置自证失败：归属槽(${ownerSlot.length}) 与替身(${stripped.length}) 不等长`);
+    }
+    const ownerAt = (idx) => {
+      let f = '';
+      for (let k = Math.min(idx, oneChar.length - 1); k >= 0; k -= 1) if (oneChar[k]) { f = oneChar[k]; break; }
+      return f === '' ? null : f;
+    };
+    // ⚠ 归属分界线：BARE 只认**显式行号引用**——数字两侧至少一侧是反引号或冒号
+    //   （表里裸形号的主流写法是 `` `:NNNN` `` 或 `` `:N-M` ``，反引号在数字之后、冒号在数字之前）。
+    //   旧的宽松写法（两侧放行空白/顿号等普通分隔符）会把**句子里的数字**当行号引用：
+    //   实测真表抽出数从 580 虚涨到 805、其中 26 条「越界/笔误」**全部**是这类误命中
+    //   （如「（`ctx.effect(...)` 在 `:355`；…」这类讲述句）。宁可少抽，不可误判作者。
+    // ⚠ 十六进制串守卫（2026-09-28 实测撞出）：契约表头部有一张「文件 → sha256」清单，
+    //   形如 `` | `lib/index.js` | `EB4CA9EA…965` | 6104 | ``。反引号里的**哈希尾巴**
+    //   会被 BARE 当行号抽走（实测：`…A95`→`:95`、`…C60A224787750216629965`→`:6104`），
+    //   且每行哈希唯一 ⇒ 这些「行号」还会被归属到别的文件头上、假报「越界/笔误」。
+    //   故：紧跟在 `[0-9A-F]` 之后的数字**不是**行号引用（真正的行号前面是冒号/反引号/空白）。
+    //   这条不只挡哈希：任何十六进制串的尾巴都不该被当成行号。
+    const BARE = /(?<=^|[\s|(（,、:`])(?<![0-9A-F])(\d{1,5}(?:\s*[-–—]\s*\d{1,5})?(?:\s*[,，]\s*\d{1,5}(?:\s*[-–—]\s*\d{1,5})?)*)(?=[\s|)）,、.。;；`])/g;
     for (const m of stripped.matchAll(BARE)) {
       const nums = expandNumbers(m[1]);
       const plain = nums.filter((x) => !x.reversed);
-      if (plain.length === 0) continue;
+      const reversed = nums.filter((x) => x.reversed);
+      // ⚠ 同格归属：该裸号所属文件 = 「**同格**内、位于它**之前**的最近一个带路径引用」。
+      //   跨格继承是误报源（见上面 cellMap 注释）；第一趟的 lastFileBare 已不再参与归属。
+      const owner = ownerAt(m.index);
+      // ⚠ 旧写法是 `if (plain.length === 0) continue;` —— 那会让**纯降序区间**的裸形列表
+      //   整段被跳过（plain 为空、reversed 非空）⇒ ⑤(i) 的第二重成因（第一重是上面的反引号）。
+      //   改判为：只有当「既没有普通号、也没有降序区间」时才跳过。
+      if (plain.length === 0 && reversed.length === 0) continue;
       if (plain.length === 1 && !plain[0].fromRange && String(plain[0].n).length < 3) continue; // 排除「6 条」这类小数字
-      if (!lastFile) continue;
+      // 降序区间同样要过「小数字」闸：`20-19`（如 order 之类）不是行号区间，别硬报降序。
+      // ⚠ 口径已知不完美（我标注）：降序端点里**有一个**≥3 位就采信 —— 形如 `1000-5` 仍可能误报。
+      if (reversed.length && !reversed.some((x) => String(x.reversed).split('-').some((t) => t.trim().length >= 3))) continue;
+      const seenBare = new Set();
       for (const n of nums) {
-        if (n.reversed) reversedRanges.push({ tableLine, file: lastFile, form: 'bare', text: n.reversed });
-        else refs.push({ tableLine, file: lastFile, line: n.n, form: 'bare', expanded: n.fromRange });
+        if (!n.reversed) {
+          // ⚠ 同一行的同一个号只能记一次：形如 `` `:850-853` `` 的区间在**展开**后逐号 push，
+          //   且同一段号还会被 PATH_FORM 那趟记一次 ⇒ 不去重则明细里出现两遍同样的号
+          //   （实测：表:145 的 :851/:852/:853 各记两次，越界 8 条里 3 条是幽灵）。
+          const key = `${n.n}`;
+          if (seenBare.has(key)) continue;
+          seenBare.add(key);
+        }
+        if (n.reversed) {
+          // ⚠ 归属不到文件也**必须**记下来：裸形号的归属靠「同行、同格最近的带路径引用」，
+          //   行上只有 `` `:2741-2671` `` 而无 `file.js:NNN` 时 owner 为 null。
+          //   旧写法在这里 `continue` 掉 ⇒ 抽到了、却因为没归属而**完全消失**，
+          //   门还打印「一条行号引用都没抽到」（把「抽到了但归不了属」说成「没抽到」）。
+          //   现在记进无归属桶，由输出显式报出（2026-09-28 实测撞出）。
+          if (!owner) {
+            reversedRanges.push({ tableLine, file: null, form: 'bare', text: n.reversed });
+          } else {
+            reversedRanges.push({ tableLine, file: owner, form: 'bare', text: n.reversed });
+          }
+        } else {
+          if (!owner) continue; // 普通裸形号无归属 ⇒ 无从判，且不是「降序」这种确定性错误
+          refs.push({ tableLine, file: owner, line: n.n, form: 'bare', expanded: n.fromRange });
+        }
       }
     }
   });
 
-  return { refs, reversedRanges };
+  // ⚠ 跨趟去重（2026-09-28 实测撞出）：同一条引用会被两趟各抽一次 ——
+  //   PATH_FORM 抽 `lib/index.js:851-853`（展开成 851/852/853），BARE 又把同一段
+  //   `` `lib/index.js:851-853` `` 里的号当裸形抽一遍 ⇒ 明细打印两遍同样的号。
+  //   去重键 = 表行 + 文件 + 行号（**不含 form**：两种形说的是同一处引用）；
+  //   先 push 的赢 ⇒ path 形优先于 bare 形（path 是作者明写的，更可信）。
+  const refsSeen = new Set();
+  const refsDeduped = [];
+  for (const r of refs) {
+    const key = `${r.tableLine}|${r.file}|${r.line}`;
+    if (refsSeen.has(key)) continue;
+    refsSeen.add(key);
+    refsDeduped.push(r);
+  }
+  return { refs: refsDeduped, reversedRanges, refsDeduped: refs.length - refsDeduped.length };
 }
 
 // ---------- 映射核心（纯函数，可被自检用合成基线直接考） ----------
@@ -285,6 +406,10 @@ function evaluate({ tablePath, baseline, refRoot = ROOT }) {
 
   const table = readFileSync(tableAbs, 'utf8');
   const { refs, reversedRanges } = extractRefs(table);
+  // ⚠ 无归属的降序区间（同行没有带路径引用可归属）也要算「抽到了」：
+  //   旧写法只看 refs 与 reversedRanges（它随后被 inScope 过滤、file=null 必被滤掉），
+  //   ⇒ 一张只有 `` `:2741-2671` `` 的表会被说成「一条行号引用都没抽到」并 exit 2（**错误归因**）。
+  const unattributedReversed = reversedRanges.filter((x) => x.file === null || x.file === undefined);
   if (refs.length === 0 && reversedRanges.length === 0) {
     return { exit: 2, reason: '未能评测：一条行号引用都没抽到（抽取装置可能失效）' };
   }
@@ -334,6 +459,7 @@ function evaluate({ tablePath, baseline, refRoot = ROOT }) {
   const stale = [];
   const same = [];
   const unmappable = [];
+  const outOfBounds = [];
   for (const r of refs) {
     if (!inScope.includes(r.file)) continue; // 不在视野，另计
     const { map, baseLines, liveLines } = maps.get(r.file);
@@ -345,13 +471,20 @@ function evaluate({ tablePath, baseline, refRoot = ROOT }) {
       // 注：状态名仍叫 out-of-baseline（纯函数 map 的既有契约，自检第 401 行用例钉着它），
       //     这里只把**人读的 why** 说清。
       const beyondLive = r.line > liveLines.length;
-      unmappable.push({
+      const rec = {
         ...r,
         why: beyondLive
           ? `越界/笔误：:${r.line} 连**现盘**都只有 ${liveLines.length} 行`
           : `超基线长度：:${r.line} > 基线 ${baseLines.length} 行`
             + `（**未**越现盘 ${liveLines.length} 行 ⇒ 疑似基线取旧、行号指向基线之后新增的代码，**不是**笔误）`,
-      });
+      };
+      // 裁定 #74-A-1③（A 派发，BL-051）：① 那一类必须让门**红**。
+      //   旧行为：两条成因都只进「不可判」，而 exit 只看 stale.length ⇒ 一张全是 `:99999` 的表
+      //   照样 RESULT: PASS / EXIT 0（A 用最小表实测撞出；我也复现：越界 1 · PASS · EXIT 0）。
+      //   新行为：① ⇒ 确定性作者错误 ⇒ 计 outOfBounds ⇒ FAIL(1)；② 维持「不可判」不进退出码。
+      //   方向：越界是**结构性**错误（那个行号在任何一版里都不存在），不是「暂时判不了」。
+      if (beyondLive) outOfBounds.push(rec);
+      else unmappable.push(rec);
       continue;
     }
     const res = map(r.line);
@@ -403,9 +536,14 @@ function evaluate({ tablePath, baseline, refRoot = ROOT }) {
     };
   }
   return {
-    exit: stale.length > 0 ? 1 : 0,
+    // 裁定 #74-A-1③：越界/笔误（行号超过被引文件本身的长度）必须让门红。
+    exit: (stale.length > 0 || outOfBounds.length > 0) ? 1 : 0,
     baseline, tableLineCount: table.split('\n').length,
-    refs, same, stale, unmappable, reversedRanges: reversedRanges.filter((x) => inScope.includes(x.file)),
+    refs, same, stale, unmappable, outOfBounds,
+    // 降序区间要**两桶都收**：视野内的 + 无归属的（file=null）。
+    // 旧写法只收 inScope 桶 ⇒ 无归属那条被静默滤掉、连「降序」都报不出来。
+    reversedRanges: [...reversedRanges.filter((x) => x.file !== null && x.file !== undefined && inScope.includes(x.file)), ...unattributedReversed],
+    unattributedReversed,
     refsTotal: refs.length,
     inScopeRefs: refs.filter((r) => inScope.includes(r.file)).length,
     outOfScope, outOfScopeRefs, hunkInfo,
@@ -426,7 +564,8 @@ function summarize(res) {
     `    在本门视野内（文件存在于工作区）= ${res.inScopeRefs}`,
     `      仍指同一行 = ${res.same.length}`,
     `      已陈旧 = ${res.stale.length}${staleFiles.length ? `（涉及 ${staleFiles.join('、')}）` : ''}`,
-    `      不可判定（落在改动块内/超界）= ${res.unmappable.length}`,
+    `      越界/笔误（行号超过被引文件本身的行数 ⇒ 确定性作者错误）= ${res.outOfBounds.length}`,
+    `      不可判定（落在改动块内 / 超基线长度）= ${res.unmappable.length}`,
     `    不在视野（被引文件不存在于本工作区）= ${res.outOfScopeRefs.length}`,
     `  降序区间（表里写反的行号区间）= ${res.reversedRanges.length}`,
     `  弱证据条目（两侧皆空白行 ⇒ 逐字佐证不适用，但映射主判据仍成立）= ${res.weakJudged}`,
@@ -469,19 +608,25 @@ function render(res, { quiet, all }) {
   L.push(...summarize(res));
   L.push('');
 
-  if (!quiet && res.stale.length) {
+  if ((!quiet || all) && res.stale.length) {
     L.push('  陈旧明细（表行号:引用 → 现应指向）:');
     for (const s of res.stale.slice(0, cap)) L.push(`    表:${s.tableLine}  ${s.file}:${s.line} → :${s.now}   （${s.form} 形）`);
     if (res.stale.length > cap) L.push(`    …余 ${res.stale.length - cap} 条（加 --all 看全）`);
     L.push('');
   }
-  if (!quiet && res.reversedRanges.length) {
+  if ((!quiet || all) && res.reversedRanges.length) {
     L.push('  降序区间明细（表里写反的行号区间，无法逐项判）:');
     for (const s of res.reversedRanges.slice(0, 20)) L.push(`    表:${s.tableLine}  ${s.file}  「${s.text}」（${s.form} 形）`);
     L.push('');
   }
-  if (!quiet && res.unmappable.length) {
-    L.push(`  不可判定明细（前 ${Math.min(20, res.unmappable.length)} 条；既不计陈旧也不计通过）:`);
+  if ((!quiet || all) && res.outOfBounds.length) {
+    L.push(`  越界/笔误明细（这 N 条**计数进退出码**：行号超过被引文件本身的行数，任何一版都不存在）:`);
+    for (const s of res.outOfBounds.slice(0, 20)) L.push(`    表:${s.tableLine}  ${s.file}:${s.line}  ${s.why}`);
+    if (res.outOfBounds.length > 20) L.push(`    …余 ${res.outOfBounds.length - 20} 条（加 --all 看全）`);
+    L.push('');
+  }
+  if ((!quiet || all) && res.unmappable.length) {
+    L.push(`  不可判定明细（前 ${Math.min(20, res.unmappable.length)} 条；既不计陈旧也不计通过、**不**进退出码）:`);
     for (const s of res.unmappable.slice(0, 20)) L.push(`    表:${s.tableLine}  ${s.file}:${s.line}  ${s.why}`);
     L.push('');
   }
@@ -492,9 +637,15 @@ function render(res, { quiet, all }) {
   }
 
   const ok = res.exit === 0;
-  L.push(ok
-    ? `RESULT: PASS —— 视野内 ${res.inScopeRefs} 处引用无陈旧（全指向基线同一行）`
-    : `RESULT: FAIL —— 陈旧 ${res.stale.length} 处`);
+  if (ok) {
+    L.push(`RESULT: PASS —— 视野内 ${res.inScopeRefs} 处引用无陈旧（全指向基线同一行）`);
+  } else {
+    // 不能只说「陈旧 0 处」：越界那种红的成因与陈旧不同，措辞必须分开（否则读者会以为门自相矛盾）。
+    const parts = [];
+    if (res.stale.length) parts.push(`陈旧 ${res.stale.length} 处`);
+    if (res.outOfBounds.length) parts.push(`越界/笔误 ${res.outOfBounds.length} 处（行号超过被引文件行数）`);
+    L.push(`RESULT: FAIL —— ${parts.join(' · ')}`);
+  }
   return L.join('\n') + '\n';
 }
 
@@ -512,8 +663,39 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   out.push('');
 
   const tableAbs = isAbsolute(tablePath) ? tablePath : join(ROOT, tablePath);
-  const original = readFileSync(tableAbs, 'utf8');
+  const original = readFileSync(tableAbs, 'utf8');   // ← **活表**，只给第二组「真身」用
   const dir = mkLiveDir('d-cld-selftest-');
+
+  // ---- **夹具冻结**（2026-09-28 裁定 #75-5 落地） ----
+  //
+  // ⚠ 为什么必须冻结：我原先让第三组/第五组直接从**活表**现取输入，结果 A 一改表
+  //   （`docs/agents/integration-contracts.md` 表:145 从「历史错号写成可抽取形」改成不可抽取形），
+  //   同一份门（指纹未变）的自检就从「判据不成立 0」翻成「判据不成立 4」——
+  //   而那四条翻掉的用例**全部拿真表或其副本当输入**。那是设计缺陷：门自己要求改表，
+  //   却把「表已改」记成装置故障。⇒ 判据类用例一律吃**冻结夹具**，真表只出现在第二组「真身」。
+  //
+  // ⚠ 夹具全部落在 `scripts/fixtures/`（我的写权内），每份都在自检输出里打印指纹：
+  //   任何一次夹具漂移都会在屏上显形，不会静默改掉判据的含义。缺失即**抛错**（fail-closed），
+  //   绝不退回活表 —— 「看不见夹具就偷偷用真表」正是这条缺陷的成因。
+  const FIXDIR = join(ROOT, 'scripts', 'fixtures');
+  const FIXTURES = [
+    ['快照表', join(FIXDIR, 'contracts.snapshot.md')],
+    ['修前夹具', join(FIXDIR, 'row145.pre-fix.md')],
+    ['修后夹具', join(FIXDIR, 'row145.post-fix.md')],
+  ];
+  const fx = {};
+  for (const [label, fp] of FIXTURES) {
+    if (!existsSync(fp)) throw new Error(`夹具缺失：${label} ⇒ ${fp}（判据类用例不得退回活表，故直接抛）`);
+    fx[label] = readFileSync(fp, 'utf8');
+  }
+  const snapshot = fx['快照表'];   // ← 第三组 / 第五组的输入；活表改了与它无关
+
+  out.push('  输入指纹（判据类用例一律吃冻结夹具；活表只进第二组「真身」）:');
+  out.push(`    活表（仅真身组）  ${tablePath} @ ${createHash('sha256').update(original, 'utf8').digest('hex').slice(0, 16)}`);
+  for (const [label, fp] of FIXTURES) {
+    out.push(`    夹具 ${label.padEnd(6)}  ${relative(ROOT, fp)} @ ${createHash('sha256').update(fx[label], 'utf8').digest('hex').slice(0, 16)}`);
+  }
+  out.push('');
 
   // ---- 第一组：装置的**核心**，用合成基线直接考（不依赖仓库此刻的状态） ----
   //
@@ -671,19 +853,29 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   }
   out.push('');
 
-  out.push('  第三组 · 真身端到端（表副本 + 目标基线）:');
+  out.push('  第三组 · 表副本用例（输入 = **冻结快照** scripts/fixtures/contracts.snapshot.md，与活表解耦）:');
+  // ⚠ 冻结基准（2026-09-28，裁定 #75-5 的第二半，我差点又漏掉）：
+  //   `base` 是拿**活表**算的；第三组每格的增量（陈旧/不在视野/越界）却是在**快照**上算的。
+  //   两者一旦不同源，活表一改增量就漂 —— 我的负向对照 A（把活表换成一张不相干的表）实测
+  //   F 格报「不在视野增量 得 326、期望 1」：326 ＝ 快照不在视野 325 + 1，而基准那侧视野被判 0。
+  //   ⇒ 凡是吃快照的用例，其基准必须**也只由快照算**。`base` 留给第二组「真身」与抬头用。
+  const frozenBase = evaluate({ tablePath: FIXTURES[0][1], baseline, refRoot });
+  if (frozenBase.exit !== 0 && frozenBase.exit !== 1) {
+    throw new Error(`冻结基准读数异常（exit ${frozenBase.exit}）：${frozenBase.reason ?? ''}`);
+  }
+  out.push(`    冻结基准（快照自身）exit ${frozenBase.exit} · 视野内 ${frozenBase.inScopeRefs} · 不在视野 ${frozenBase.outOfScopeRefs.length} · 越界 ${frozenBase.outOfBounds.length}`);
   const CASES = [
     {
       name: 'A 注入正确引用（client/client.js:160，两版逐字未动）⇒ 不得新增陈旧',
       mutate: (t) => `${t}\n| 自检 | \`client/client.js:160\` | 装置自检注入 |\n`,
-      expectExit: base.exit,
+      expectExit: frozenBase.exit,
       expectText: null,
       expectStaleDelta: 0,
     },
     {
       name: 'B 注入一个转述不存在的文件（client/clinet.js:160）⇒ 走「不在视野」，不得被当通过也不得报陈旧',
       mutate: (t) => `${t}\n| 自检 | \`client/clinet.js:160\` | 装置自检注入 |\n`,
-      expectExit: base.exit,
+      expectExit: frozenBase.exit,
       expectText: null,
       expectStaleDelta: 0,
       expectOutOfScopeDelta: +1,
@@ -705,17 +897,23 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
       expectRaw: (t) => t.includes('视野为空'),
     },
     {
-      name: 'F 真表 + 追加一个不存在的被引文件 ⇒ 视野内仍是 360、不在视野 218→219、exit 不变（证明追加不会污染真身读数）',
+      name: 'F 快照表 + 追加一条不在视野的引用 ⇒ 视野内不缩、不在视野 +1、越界数不变',
+      // ⚠ 期望值不得写死与输入内容绑定的绝对数（裁定 #75-5）：
+      //   我先后写过 `expectExit: 0`（老装置）→ `expectExit: 1`（越界改判后、A 修表前）
+      //   —— 两次都因为把「输入当时的数」写进期望而翻。现在用 `frozenBase.exit`（只由快照算）（= 本次输入自己的基线 exit）。
+      //   本格考的**只是**「追加一条不在视野的引用不改变视野内/越界这两件事」。
       mutate: (t) => `${t}\n| 自检 | \`client/nonexistent-aaa.js:1\` | 视野为空守卫 |\n`,
-      expectExit: 0,
+      expectExit: frozenBase.exit,
+      expectOutOfBoundsDelta: 0,
       expectText: null,
       expectMinInScope: 1,
       expectOutOfScopeDelta: +1,
     },
     {
-      name: 'E 真表放在它的**真实位置**（docs/agents/ 下、按仓库根解析）⇒ 视野内必须 > 0（这份用例本来就能抓住「基准选错」那一格）',
+      name: 'E 快照表放在**仓库内**（按仓库根解析）⇒ 视野内必须 > 0（这份用例能抓住「基准选错」那一格）',
+      // ⚠ 同 F：用 `frozenBase.exit`（只由快照算），不写死。这格考的是「视野不为空」，不是「表是绿的」。
       mutate: (t) => t,
-      expectExit: 0,
+      expectExit: frozenBase.exit,
       expectText: null,
       expectMinInScope: 1,
     },
@@ -724,7 +922,7 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   CASES.forEach((c, idx) => {
     casesRun += 1;
     const copy = join(dir, `case-${idx}.md`);
-    writeFileSync(copy, c.mutate(original));
+    writeFileSync(copy, c.mutate(snapshot));   // ⚠ 吃冻结快照、不吃活表（裁定 #75-5）
     let res;
     try {
       res = evaluate({ tablePath: copy, baseline, refRoot });
@@ -736,7 +934,7 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
     const problems = [];
     if (res.exit !== c.expectExit) problems.push(`exit 得 ${res.exit}、期望 ${c.expectExit}`);
     if (c.expectRaw !== undefined && c.expectRaw !== null) {
-      const raw = res.exit === 2 ? (res.reason ?? '') : render(res, { quiet: true });
+      const raw = res.exit === 2 ? (res.reason ?? '') : render(res, { quiet: true, all: true }); // ⚠ 自检取样必须带 all：{quiet:true} 会把明细块全静音，任何「明细里应出现 X」的断言会恒假红
       if (!c.expectRaw(raw)) problems.push('原始读数不含期望特征');
     }
     if (c.expectMinInScope !== undefined) {
@@ -744,16 +942,24 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
       if (got === null || got < c.expectMinInScope) problems.push(`视野内 得 ${got}、期望 ≥ ${c.expectMinInScope}`);
     }
     if (c.expectText !== null && c.expectText !== undefined) {
-      const txt = res.exit === 2 ? (res.reason ?? '') : render(res, { quiet: true });
+      const txt = res.exit === 2 ? (res.reason ?? '') : render(res, { quiet: true, all: true });
       if (!txt.includes(c.expectText)) problems.push(`文案里没有「${c.expectText}」`);
     }
     if (c.expectStaleDelta !== undefined) {
-      const got = res.exit === 2 ? null : res.stale.length - base.stale.length;
+      const got = res.exit === 2 ? null : res.stale.length - frozenBase.stale.length;
       if (got !== c.expectStaleDelta) problems.push(`陈旧增量 得 ${got}、期望 ${c.expectStaleDelta}`);
     }
     if (c.expectOutOfScopeDelta !== undefined) {
-      const got = res.exit === 2 ? null : res.outOfScopeRefs.length - base.outOfScopeRefs.length;
+      const got = res.exit === 2 ? null : res.outOfScopeRefs.length - frozenBase.outOfScopeRefs.length;
       if (got !== c.expectOutOfScopeDelta) problems.push(`不在视野增量 得 ${got}、期望 ${c.expectOutOfScopeDelta}`);
+    }
+    if (c.expectOutOfBoundsDelta !== undefined) {
+      const got = res.exit === 2 ? null : res.outOfBounds.length - frozenBase.outOfBounds.length;
+      if (got !== c.expectOutOfBoundsDelta) problems.push(`越界增量 得 ${got}、期望 ${c.expectOutOfBoundsDelta}`);
+    }
+    if (c.expectReversedRanges !== undefined) {
+      const got = res.exit === 2 ? null : res.reversedRanges.length;
+      if (got !== c.expectReversedRanges) problems.push(`降序区间数 得 ${got}、期望 ${c.expectReversedRanges}`);
     }
     if (problems.length) { failures += 1; out.push(`  FAIL ${c.name}\n         ${problems.join(' · ')}`); }
     else {
@@ -774,6 +980,132 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   casesRun += 1;
   out.push('');
 
+  // ---- 第五组：BL-051 两条新判据（2026-09-28 由 D 落地） ----
+  //
+  // 为什么必须在这里、用**自造最小表**再考一遍（第三组在真表上考不到）：
+  //   ① 真表里本来就没有越界引用（A 修正表之前）⇒ 「越界 ⇒ FAIL」在真表上是**空断言**；
+  //   ② ⑤(i) 裸形降序区间在真表里数量为 0 ⇒ 同样考不到「它会不会被报出来」。
+  //   故这一组自造表：每条都指名要考的那一处，并配一条**只差一处**的反向对照
+  //   （同一张表、把该处换成正确形态 ⇒ 必须不报），否则「报红」可能只是无条件噪声。
+  //
+  // ⚠ 两个「能报红」的自证（我实际跑过，记在此供后人复现）：
+  //   ① 把 `exit` 那一行改回 `stale.length > 0 ? 1 : 0` ⇒ 越界两格必红（1 掉成 0）；
+  //   ② 把裸形降序那三行的 `if (!lastFile) { ... }` 改回旧的 `continue` ⇒ 降序两格必红。
+  const CASES_51 = [
+    {
+      name: 'BL-051① 越界/笔误：内联最小表注入 client/client.js:99999（连现盘都没这个行号）⇒ 必须 FAIL(exit 1) 并报「越界/笔误」',
+      // ⚠ 内联夹具、不吃任何文件（裁定 #75-5）：我原先在**真表**上追加 ⇒ 得数里含真表当时自带的条数，
+      //   写死成 6 之后 A 一改表就翻。现在这张表只有这一条引用，绝对数 1 的含义不随任何外部文件变。
+      mutate: () => '| 文件 | 说明 |\n|---|---|\n| `client/client.js:99999` | 装置自检注入（越界） |\n',
+      expectExit: 1,
+      expectText: null,
+      expectOutOfBoundsAbs: 1,
+      // ⚠ 断言必须看**明细块**，不能看 `越界/笔误` 这个短语：摘要行
+      //   `越界/笔误（…⇒ 确定性作者错误）= 0` 是**无条件打印**的 ⇒ `s.includes('越界/笔误')` 恒真，
+      //   那是一条永远不会失败的断言（我第一版就是这么写的，反向对照因此恒假红）。
+      expectRaw: (s) => s.includes('越界/笔误明细') || s.includes('越界/笔误（行号超过被引文件本身的行数 ⇒ 确定性作者错误）= 1'),
+    },
+    {
+      name: 'BL-051① 反向对照：同一张最小表把 :99999 换成合法行号 `client/client.js:160` ⇒ 越界必须 0、exit 0',
+      // ⚠ 反向对照必须落在**自造最小表**上，且与上面那条**只差一个数字**（99999→160）。
+      //   我第一版把它写在**真表**上 ⇒ 恒假红：真表自带 5 条越界（表:145 的历史记述段），
+      //   「文案里不含越界」在真表上永远不成立 —— 假红与假绿一样是装置故障。
+      // ⚠ 内联夹具（裁定 #75-5）：与上一条**只差一个数字**（99999→160），故「报红」不是无条件噪声。
+      mutate: () => '| 文件 | 说明 |\n|---|---|\n| `client/client.js:160` | 装置自检注入（合法行号） |\n',
+      expectExit: 0,
+      expectText: null,
+      expectOutOfBoundsAbs: 0,
+      // 反向对照：既不能出现越界明细块，也不能出现「越界 = N（N≥1）」那一行。
+      expectRaw: (s) => !s.includes('越界/笔误明细') && !/越界\/笔误[^\n]*= [1-9]/.test(s),
+    },
+    {
+      name: 'BL-051② 裸形降序区间（裸形 + 冒号前缀写法 `:2741-2671`，同行有可归属的带路径引用）⇒ 必须被计数并报出',
+      // ⚠ 这一格必须写成**真表同形**：`file.js:NNN` 在前、反引号裸号在后。
+      //   我第一版写成 `` `lib/peer-message.js` `` + `` `:2741-2671` `` ⇒ 带路径形被替换成空格后
+      //   裸号**归属不到**任何文件，虽仍报降序，但明细打印的是 `null`（归属这一半没被考到）。
+      //   现在同时断言「明细里出现该文件名」⇒ 归属与「报得出降序」两件事一起被钉住。
+      mutate: () => '| 文件 | 说明 |\n|---|---|\n| `lib/peer-message.js:140` | 原写 `:2741-2671` 降序 |\n',
+      expectExit: 0,
+      expectText: null,
+      expectReversedRanges: 1,
+      expectRaw: (s) => s.includes('降序区间明细') && s.includes('lib/peer-message.js') && !s.includes('null  「2741-2671」'),
+    },
+    {
+      name: 'BL-051② 反向对照：同一行把区间写成升序 `:140-141` ⇒ 不得报降序（证明「报降序」不是无条件噪声）',
+      mutate: () => '| 文件 | 说明 |\n|---|---|\n| `lib/peer-message.js:140` | 现为 `:140-141` 升序 |\n',
+      expectExit: 0,
+      expectText: null,
+      expectReversedRanges: 0,
+      expectRaw: (s) => !s.includes('降序区间明细'),
+    },
+    {
+      name: 'BL-051③（冻结夹具·修前）裸 `:850-853` 按「同行最近的带路径形」归属 ⇒ 5 条越界、点名 850/851/852/853/1022',
+      // ⚠ 输入 = `scripts/fixtures/row145.pre-fix.md`（A 修表**前**那行的原文，从 `6f8d840` 取出），
+      //   **不读活表**（裁定 #75-5）。这条钉住的是**归属机制**，不是「这一行有问题」：
+      //   该行是 A 2026-09-26 的更正经述，而它把历史错号写成了可抽取形（`lib/index.js:851-853` 与裸 `:850-853`/`:1022`）。
+      //   裁定 #75-2 明确：按文本机械归属，850 与 :1022 前面最近的带路径形**确实**是本仓 lib/index.js
+      //   ⇒ 不是假阳，错在表把历史引文写成了活引用 ⇒ 处置 = 改表（A 已改），门不动。
+      //   逐条点名是为了让**两种解读**都能被看见：851/852/853 在叙述里真的写错了，850/1022 是被前文的
+      //   `lib/index.js:851-853` 机械继承过来的（语义上属 dsh-app-boot/lib/index.js）。
+      mutate: () => fx['修前夹具'],
+      expectExit: 1,
+      expectText: null,
+      expectOutOfBoundsAbs: 5,
+      expectRaw: (s) => s.includes('越界/笔误明细')
+        && /表:3\s+lib\/index\.js:850\b/.test(s)
+        && /表:3\s+lib\/index\.js:851\b/.test(s)
+        && /表:3\s+lib\/index\.js:852\b/.test(s)
+        && /表:3\s+lib\/index\.js:853\b/.test(s)
+        && /表:3\s+lib\/index\.js:1022\b/.test(s),
+    },
+    {
+      name: 'BL-051③ 反向对照（冻结夹具·修后）A 改表后同一条叙事 ⇒ 越界必须 0、exit 0',
+      // ⚠ 输入 = `scripts/fixtures/row145.post-fix.md`。与上一条**只差 A 那一次改表**：
+      //   历史错号被改写成不可抽取形（`851–853` 用全角连字符、且不带文件名前缀）＋ 明写 app-boot 全路径
+      //   ⇒ 越界 5 → 0。这就是「改表不改门」那条裁定的可复现证据。
+      mutate: () => fx['修后夹具'],
+      expectExit: 0,
+      expectText: null,
+      expectOutOfBoundsAbs: 0,
+      expectRaw: (s) => !s.includes('越界/笔误明细'),
+    },
+  ];
+
+  out.push('');
+  out.push('  第五组 · BL-051 判据（输入 = 内联最小表 / **冻结夹具**，每条配只差一处的反向对照）:');
+  CASES_51.forEach((c, idx) => {
+    casesRun += 1;
+    const copy = join(dir, `case51-${idx}.md`);
+    writeFileSync(copy, c.mutate(snapshot));   // ⚠ 吃冻结快照、不吃活表（裁定 #75-5）
+    let res;
+    try {
+      res = evaluate({ tablePath: copy, baseline, refRoot });
+    } catch (e) {
+      out.push(`  FAIL ${c.name}\n         装置抛异常：${String(e.message).split('\n')[0]}`);
+      deviceErrors += 1;
+      return;
+    }
+    const problems = [];
+    if (res.exit !== c.expectExit) problems.push(`exit 得 ${res.exit}、期望 ${c.expectExit}`);
+    const raw = res.exit === 2 ? (res.reason ?? '') : render(res, { quiet: true, all: true }); // ⚠ 同上：取样带 all
+    if (c.expectRaw !== undefined && c.expectRaw !== null && !c.expectRaw(raw)) problems.push('原始读数不含期望特征');
+    if (c.expectOutOfBoundsAbs !== undefined) {
+      const got = res.exit === 2 ? null : res.outOfBounds.length;
+      if (got !== c.expectOutOfBoundsAbs) problems.push(`越界数 得 ${got}、期望 ${c.expectOutOfBoundsAbs}（绝对值）`);
+    }
+    if (c.expectReversedRanges !== undefined) {
+      const got = res.exit === 2 ? null : res.reversedRanges.length;
+      if (got !== c.expectReversedRanges) problems.push(`降序区间数 得 ${got}、期望 ${c.expectReversedRanges}`);
+    }
+    if (problems.length) { failures += 1; out.push(`  FAIL ${c.name}\n         ${problems.join(' · ')}`); }
+    else {
+      out.push(`  PASS ${c.name}`);
+      out.push(res.exit === 2
+        ? `         exit 2 · ${res.reason ?? ''}`
+        : `         exit ${res.exit} · 越界 ${res.outOfBounds.length} · 降序 ${res.reversedRanges.length}`);
+    }
+  });
+
   // ---- 第四组：帧错配告警本身（这是裁定 #70 ④a 要求的新行为，必须自己考一遍） ----
   //
   // 为什么必须配**双向**对照：只证「基线≠HEAD 时出现告警」是半个判据——一个恒打告警的装置
@@ -786,7 +1118,7 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
     const checks = [];
     const renderQuietly = (bl) => {
       const r = evaluate({ tablePath: copy, baseline: bl, refRoot });
-      return r.exit === 2 ? null : render(r, { quiet: true });
+      return r.exit === 2 ? null : render(r, { quiet: true, all: true });
     };
     const mismatched = renderQuietly(prevBaseline);
     const matched = renderQuietly(baseline);
@@ -815,7 +1147,7 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   // 临时目录在所有组跑完之后再清（第四组也要在 dir 里写表副本；
   // 另：cleanup() 在 finally 里也会兜底清一次，这里是为了让 --selftest 的输出环境干净）。
   rmSync(dir, { recursive: true, force: true });
-  out.push(`用例：${casesRun} 项（第一组 ${synthetic.length} 项合成基线 · 第二组 2 项真身 · 第三组 ${CASES.length} 份表副本 · 第四组 1 项帧错配告警双向对照 · 还原 1 项）`);
+  out.push(`用例：${casesRun} 项（第一组 ${synthetic.length} 项合成基线 · 第二组 2 项真身 · 第三组 ${CASES.length} 份表副本 · 第四组 1 项帧错配告警双向对照 · 第五组 ${CASES_51.length} 项 BL-051 判据 · 还原 1 项）`);
   out.push(`      装置抛异常 ${deviceErrors} · 判据不成立 ${failures}`);
   out.push(failures === 0 && deviceErrors === 0
     ? 'RESULT: PASS —— 装置自检成立'
