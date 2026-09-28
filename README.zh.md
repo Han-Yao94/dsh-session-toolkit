@@ -2,9 +2,9 @@
 
 [English](README.md) | 中文
 
-DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Web 重启服务、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
+DeepSeek Harness 的整合插件工具箱。将先前 5 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
 
-当前版本:**0.1.12**,已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证——它同时是**最低支持版本**——并在 **`dsh-v0.1.7-rc.1`** 上**重新验证过**(**契约面 + 全套门,非完整功能回归**):0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
+当前版本:**0.1.13**,已对照 **DeepSeek Harness `dsh-v0.1.7-alpha.1`** 验证——它同时是**最低支持版本**——并在 **`dsh-v0.1.7-rc.1`** 上**重新验证过**(**契约面 + 全套门,非完整功能回归**):0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
 
 ---
 
@@ -16,6 +16,8 @@ DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件
 ### 全局提示词(Global Prompt)
 设置页(`settings.section`,id `global-prompt`,order 30),以 **Tabs(全局 / 按工作区)** 渲染。*全局* Tab 注入一段作用于所有会话系统提示词的文本(段 `global-prompt`,order 50);*按工作区* Tab 注入按工作区提示词(段 `workspace-prompt`,order 60)。两个段都以 **`interpolate: false`** 注册:提示词文本与引用文件里的 `{{...}}` 一律按字面保留,用户内容永不被改写,未注册的 `{{name}}` 也不可能让组装失败。0.1.6 之前的内核没有分段的 `interpolate` 开关,由 `lib/prompt-literal.js` 在组装结果上退化为 `{` 连续串空格化。
 
+同一个 webServer 上另注册只读状态路由 `GET /api/session-toolkit/state`(活跃工作区 + 引用文件读取状态;非 `GET` 一律 405),设置页据此读取那两项运行时投影——它们不占 settings 命名空间、也从不落盘。
+
 ### 工作区提示词(Workspace Prompt)
 为 `cwd` 前缀匹配到已配置工作区目录(该目录及子目录)的会话注入按工作区提示词。工作区列表由**活跃会话的 `cwd`** 聚合而来(`ctx.agents.roots()`,去重并按会话数计数)。当多个已启用工作区前缀命中某会话的 `cwd` 时,取**最具体(路径最深/最长)**者。`removed` 记录用户已移除的路径,使活跃工作区同步不重新补回。工作区行的启用开关 **即时保存(live-save)**;「保存」按钮仅持久化提示词**内容 + 引用文件**。
 
@@ -24,14 +26,6 @@ DeepSeek Harness 的整合插件工具箱。将先前 6 个独立的本地插件
 
 ### 会话自动恢复(Session Auto-Resume)
 开启开关的会话在 GUI 重启后自动恢复,优先走**官方恢复链路**(`ctx.sessionController.resolveAgent`)——它除了 mount preset,还会通过 `installSelection` 恢复会话自己的模型选择,并做 subagent 归属校验与并发恢复去重;0.1.6 之前没有该服务的内核回落为 `ctx.agents.resume` + 手工 mount preset,并携带 `agentDefaultModel` 的默认模型。开启某会话即立即恢复(false→true 边沿)。过滤:开关开启、仅顶层(无 subagent origin、无 `delegationDepth > 0`、无 `parentSession`)、非空白(快照形状的 `eventCount !== 0`)。并发受限(`CONCURRENCY = 3`),逐项失败隔离 + 在途集合防重复恢复。
-
-### Web 重启(Web Restart)
-General 设置中的「重启服务」入口(`settings.general.item`,id `web-restart`,order 90),重启 GUI 服务器并显示全屏进度覆盖层(探针驱动进度、重载前填充动画、90 秒超时回退到手动刷新)。两条平台链路都**独立于将要退出的服务器进程**:
-
-- **Windows**(`windows-script`):`wscript.exe` 执行 launcher VBS(隐藏控制台),由它运行 `<DSH_HOME>/autostart/dsh-web-restart.cmd`;spawn 继承服务器进程 token,提权分支(唯一 UAC 来源)不可达。
-- **macOS / Linux**(`posix-relaunch`;配置了 `webRestart.scriptPath` 时为 `posix-script`):**无需任何配置即可自重启**——host 生成一次性 `/bin/sh` 脚本:SIGTERM 当前 PID → 最多等 10 秒(超时 SIGKILL)→ `cd` 回原工作目录 → 以原命令(`process.execPath` + `process.argv.slice(1)`)重新执行,输出追加到 `<DSH_HOME>/autostart/dsh-web-restart.log`。若服务器由 supervisor 之类托管,可把 `webRestart.scriptPath` 指向自己的 `.sh` 接管。
-
-client 挂载时探测 `GET /api/restart`,host 回报 `available: false`(不支持的平台)时直接隐藏入口,该平台 `POST` 返回 501。路由:`GET /api/restart`(健康探针,恒 200 + `available`/`mode`/`platform`)与 `POST /api/restart`(触发;重启在途 **409**,配置的脚本不存在或无法自重启 **500** 且带原因,可继续 **202** + 500ms 缓冲后 spawn)。client **只在拿到 202 时进入覆盖层**——其它状态就地显示错误,不再空转 90 秒。恢复检测采用**中断-恢复**:覆盖层仅在观察到探针连续失败 `restartFailThreshold` 次并再次返回 200 后重载;若探针全程可达则报告「未检测到重启」(`noRestart`)直到超时,提供手动刷新。
 
 同一个 webServer 上另注册只读状态路由 `GET /api/session-toolkit/state`(活跃工作区 + 引用文件读取状态;非 `GET` 一律 405):设置页靠它拿这两项**运行时投影**,因此它们不再占用 settings 命名空间,也不落盘。
 
@@ -81,7 +75,7 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 
 ## 架构
 
-- **Host 半** —— `lib/index.js` 组装九个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`web-restart.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` 两组 volatile 字段的读取、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读)、活跃工作区聚合(`agents.roots()` → `GET /api/session-toolkit/state`),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
+- **Host 半** —— `lib/index.js` 组装八个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` 两组 volatile 字段的读取、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读)、活跃工作区聚合(`agents.roots()` → `GET /api/session-toolkit/state`),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
 - **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;五个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件;每文件状态来自 `GET /api/session-toolkit/state` 的轮询投影)。
 
 ### 注册的 Slots
@@ -89,7 +83,6 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 | Slot | Id | Order / priority | 功能 |
 |---|---|---|---|
 | `settings.section` | `global-prompt` | order 30 | 全局 + 工作区提示词页(Tabs) |
-| `settings.general.item` | `web-restart` | order 90 | 重启入口 |
 | `conversation.session.header.actions` | `copy-session-id` | order 30 | 复制会话 ID |
 | `conversation.session.header.actions` | `session-identity` | order 40 | 身份按钮 |
 | `conversation.session.header.actions` | `session-log-download-moved` | order 41 | Session log 下载 |
@@ -113,7 +106,7 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 | `globalPrompt.{enabled,content,files}` | `{enabled: boolean, content: string, files: string[]}` | 启用时注入所有会话。`files` 为引用文件列表,组装时读取并追加(按 mtime/大小缓存;读取失败或超限的文件跳过)。 |
 | `workspacePrompt.workspaces` | `Record<path,{enabled, content, files: string[]}>` | 按工作区提示词。某会话会得到与其 `cwd` 目录前缀匹配、路径最深(最具体)且启用的工作区提示词。 |
 | `workspacePrompt.removed` | `string[]` | 用户已移除的路径,使活跃工作区同步不重新补回。 |
-| `client.*` | 7 个 UI 旋钮(见下表) | 浏览器半的运行时参数(字符上限、重启超时/轮询/填充、复制反馈)。 |
+| `client.*` | 2 个 UI 旋钮(见下表) | 浏览器半的运行时参数(字符上限、复制反馈)。 |
 
 **运行时投影(不落盘、不属于 config)**:活跃工作区 `[{path, sessionCount}]` 来自 **`ctx.agents.roots()`**(各 agent 的 `session.header.cwd` 去重计数;不来自本插件作用域不可见的 `workspaceRegistry`),引用文件读取状态为 `Record<global\|path, [{filePath, status: 'ok'\|'fail', charCount?, reason?}]>`;两者都经 `GET /api/session-toolkit/state` 提供给设置页。
 
@@ -146,18 +139,10 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
     autoResume:
       concurrency: 3
       sessions: {}            # volatile:Record<sessionId, boolean>
-    webRestart:
-      scriptPath: ''          # 可选;缺省推导为 <DSH_HOME>/autostart/dsh-web-restart.cmd
-      spawnDelayMs: 500
     promptDedup:
       enabled: true           # 三段(身份/全局/工作区)跨段行级去重开关;默认 true = 开启(仅显式设为 false 时禁用)
     client:
-      identityCharLimit: 4000 # volatile:以下 7 键都由浏览器半读取
-      restartTimeoutMs: 90000
-      restartPollMs: 1000
-      restartFillMs: 600
-      restartFailThreshold: 2
-      restartSettleMs: 8000
+      identityCharLimit: 4000 # volatile:以下 2 键都由浏览器半读取
       copyFeedbackMs: 1600
 ```
 
@@ -170,8 +155,6 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 | `globalPrompt.maxFileBytes` | 262144 | 单个引用文件的字节上限;超限文件跳过(状态 `fail`)而不是阻塞组装。 |
 | `globalPrompt.maxTotalBytes` | 1048576 | 单个段全部引用文件的合计字节预算。 |
 | `autoResume.concurrency` | 3 | 启动恢复的最大在途 resume 数。 |
-| `webRestart.scriptPath` | 推导 | 重启脚本路径。为空(默认)= Windows 推导 `<DSH_HOME>/autostart/dsh-web-restart.cmd`、macOS+Linux 推导 `…/dsh-web-restart.sh`,并在 POSIX 上额外启用**自重启**(无需脚本)。填路径=交给你自己的脚本:POSIX 下经 `/bin/sh` 执行,文件不存在时 `POST` 立即 500,不再让覆盖层空转。 |
-| `webRestart.spawnDelayMs` | 500 | 202 缓冲后 spawn 重启脚本的延迟。 |
 | `promptDedup.enabled` | true | 三段(身份/全局/工作区)系统提示词跨段行级去重开关(默认开启,仅显式设为 false 时禁用)。开启时,三段中出现过的**完全相同的非空原行**只保留"先出现"一份(全局 seen 贯穿三段),后出现段的重复行被去掉;**空行永远保留**(它是 markdown 的段落/列表分隔)。任何段独有内容一律保留。不解析 `{{name}}` 占位符、不破坏 markdown、不设 complete,绝不动 harness 自带段。 |
 | `identity.default` / `identity.sessions` | 空 | **用户数据**(volatile):默认身份与每会话身份。设置页「会话身份」写入;也可直接写 profile patch。 |
 | `globalPrompt.enabled` / `.content` / `.files` | off / 空 | **用户数据**(volatile):全局提示词开关、正文、引用文件列表。 |
@@ -182,11 +165,6 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 | 键 | 默认值 | 含义 |
 |---|---|---|
 | `client.identityCharLimit` | 4000 | 身份编辑区字符上限(UI 软上限;全局提示词编辑区同用)。 |
-| `client.restartTimeoutMs` | 90000 | 重启覆盖层超时(之后提示手动刷新)。 |
-| `client.restartPollMs` | 1000 | 重启健康轮询间隔(也是进度 tick)。 |
-| `client.restartFillMs` | 600 | 检测到恢复后的进度填充动画时长。 |
-| `client.restartFailThreshold` | 2 | 判定中断前的连续健康轮询失败次数。 |
-| `client.restartSettleMs` | 8000 | 检测到恢复后、自动刷新前的稳定窗口(ms)。DSH 会话标题由 **LLM 异步生成**、无就绪信号,此值是"重启后首轮 reload 的等待窗口",用于改善标题 fallback(显示为工作区名)。若个别会话标题仍显示工作区名,可手动刷新或调大该键;根治需 DSH 提供"标题就绪"信号(建议向 DSH 反馈)。 |
 | `client.copyFeedbackMs` | 1600 | 复制反馈对勾时长。 |
 
 ### 从旧 `settings.yaml` 迁移(0.1.6 → 0.1.7)
@@ -297,7 +275,6 @@ node scripts/dsh-log-ui.drift.mjs --harness <deepseek-harness 路径>          #
 - **frozen 配置铁律(红线)** —— volatile 字段 `ref.get()` 返回的是 **`deepFreeze` 快照(不可变)**。任何要改的地方必须先 **`{ ... }`(数组 `.slice()`)** 拷贝成可变对象再提交:host 半把整份新值交给 `ctx.get('settings').update(...)`,浏览器半把新值交给表单的 `set` / `mutate`(它们按 config 路径提交,不用整份替换)。直接改冻结对象会抛 `object is not extensible`(正是此处修复的「工作区列表空」根因)。同一 `{ ... }` 拷贝规则适用于 client 对 `workspacePrompt.workspaces` 的写入(`onWsFilesChange` / `save` / `saveWsEnabled` / `removeWorkspace`)。
 - **引用文件读取、失败跳过** —— `readPromptFiles` 在每次组装的 `text()` 内运行(stat 判定是否重读);读取失败或超限的文件不会中断组装,其状态被记录进进程内投影供 `GET /api/session-toolkit/state` 与设置页显示,且只在内容变化时替换投影对象。
 - **自动上线绝不调用 `dispose()`** —— `AgentHandle.dispose()` 会从存储移除会话;关闭开关只影响下次重启,绝不下线当前会话。
-- **重启零 UAC 是构造性保证** —— spawn 继承服务器进程 token(SYSTEM 或用户),`taskkill` 目标是同权限进程,脚本提权分支(唯一 UAC 来源)不可达。若 3080 被其他程序占用,仍可能出现提权重试(重启脚本中有说明)。
 - **遮蔽基于 cell shadowing** —— utilities 条目以更低 priority 重注册官方 `session-log-download` cell;遮蔽崩溃时官方条目优雅 abdicate 回退。
 - **纯文本转换** —— `toPlainText`(10 条规则、代码围栏状态机、宽松匹配)仅在发送时执行;消息结构与 `source: { kind: 'user' }` 不变。
 
@@ -314,7 +291,6 @@ node scripts/dsh-log-ui.drift.mjs --harness <deepseek-harness 路径>          #
 - 聚合 `inject` 并集会等待所列全部服务;某 profile 缺一服务会拖慢整包 apply(web profile 当前齐备)。
 - harness 提供的依赖区间是前置版本并集;改完区间必须重跑 `pnpm install`,并在装好的 profile 上跑 `node scripts/dependency-skew.measure.mjs --profile <DSH_HOME>/profiles/web`(期望 `SKEW_COUNT=0`;`DE-INSTANCE` 表示同版本不同实例,§F 判定为可接受)。
 - `ctx.get('agentDefaultModel')`、`sessionTitle`、`workspaceRegistry` 改为调用时惰性解析,缺失时降级为 cwd/路径寻址;`tools` 与 `webServer` 改用 `ctx.inject` 等待就绪——loader 并发创建条目,apply 时刻的 `ctx.get` 没有顺序保证,晚到会让功能永久静默消失。
-- **重启探测窗口** — 仅在健康探测连续失败 `restartFailThreshold × restartPollMs`(默认 2 × 1000 ms = 2 s)后恢复时判定为重启。若 relaunch 在该窗口内完成,覆盖层可能误报「未检测到重启」(`noRestart`);调低 `restartFailThreshold` 到 1 虽更灵敏,也会让单次瞬时失败被误判为重启中断。
 - **引用文件在组装路径预热** —— `readPromptFiles` 每次组装对每个引用文件做一次 `statSync`,仅在 mtime/大小变化时读盘;单文件与合计字节预算避免超大文件阻塞组装或撑爆提示词,状态投影也只在变化时写入。client 端 `files` 即时保存(`onWsFilesChange` / `save`)。
 - **UI 旋钮来自同一条目的 `client.*`** —— 浏览器半经 `configForms.get('session-toolkit')` 读 `client.*` 字段(表单不可用时回落冻结的 `UI_FALLBACK`)。client 条目本身仍拿不到 cordis 行配置,但设置的读取已不再需要 host 镜像:同一条目 Config 两侧都可见。
 - **最低 harness 版本 = `dsh-v0.1.7-alpha.1`** —— settings 数据面在 0.1.7 改成「条目 Config 的 volatile 字段 + `configForms`」。0.1.6 及更早没有 `configForms`,客户端条目会停在 `pending`,web 客户端报「Failed to load plugins」;这是刻意的响亮失败(硬 inject),不是静默降级。

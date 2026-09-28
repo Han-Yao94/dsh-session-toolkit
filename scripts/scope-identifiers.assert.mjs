@@ -170,7 +170,7 @@ console.log(`[1/3] 正向对照：切出 ${r.blocks.length} 个 IIFE 块 · 全�
 if (r.unclosed.length > 0) fail(`自保①：有 ${r.unclosed.length} 个块头找不到闭包（:${r.unclosed.join(',:')}）⇒ 切分失配，不许当成"没有块要检查"`)
 if (r.blocks.length === 0) fail('自保①：一个 IIFE 块都没切出来 ⇒ 形状锚失配（这种情况**不是"没有问题"**）⇒ 报红')
 // ⭐ 自保①-b：块数与基线一致（基线由本文件当前形态给出；不一致必须人来看）
-const EXPECT_BLOCKS = 5
+const EXPECT_BLOCKS = 4
 if (r.blocks.length !== EXPECT_BLOCKS) {
   fail(`自保①：切出 ${r.blocks.length} 个块，基线是 ${EXPECT_BLOCKS} 个 ⇒ 文件结构变了或形状锚失配`
     + `（若确认是合理的结构变化，请同步 EXPECT_BLOCKS；**不许**把它当成"少检查几个块"）`)
@@ -197,8 +197,12 @@ const CASES = [
       expectMissing: { blocks: 1, alias: 'react' },
     },
     {
-      label: '去掉模块 3 的 `var react = require(\'react\')`（同一形态、另一块）',
-      mutate: (s) => s.replace(/^(\s*)var react = require\('react'\);\n(\s*var react_jsx_runtime = require\('react\/jsx-runtime'\);\n\s*var NS = 'web-restart-ui';)/m, '$2'),
+      label: '去掉模块 4 的 `let react = require(\'react\')`（同一形态、另一块）',
+      // ⚠ 锚点于 2026-09-28 重定向（裁定 #46-D-1）：原锚认的是旧模块 3 = web-restart 的
+      //    `var NS = \'web-restart-ui\'`；那个模块随「整功能删除」消失 ⇒ 原锚零命中。
+      //    新锚 = 现模块 4（复制会话 ID，块 :2067 起）的 4 行 require 段，以 `var NS = \'peer-message-ui\';` 定位
+      //    （文件里只出现一次）。形态相同：删掉 `react` 那一行、其余 require 保留 ⇒ 该块仍用 `react.` ⇒ 必缺绑定。
+      mutate: (s) => s.replace(/^(\s*)let react = require\('react'\);\n(\s*let react_jsx_runtime = require\('react\/jsx-runtime'\);\n\s*let primitives = require\('@deepseek-ai\/dsh-client-ui-primitives'\);\n\s*var NS = 'peer-message-ui';)/m, '$2'),
       expectMissing: { blocks: 1, alias: 'react' },
     },
     {
@@ -209,11 +213,21 @@ const CASES = [
       expectSplitFailure: true,
     },
     {
-      label: '部分失配：只让**一个**块头失配（5 → 4）⇒ 自保①必须抓住"块数与基线不一致"',
+      label: '部分失配：让**两个**块头失配（4 → 2）⇒ 自保①必须抓住"块数与基线不一致"',
+      // ⚠ 2026-09-28（裁定 #46-D-1，理由于 #46-D-2 按实测改写）：
+      //    本条**必须**至少弄失配**两个**块头。理由不是「单块头会让断言只剩一支硬撑」——那个说法
+      //    经 A 的探针否证、我也独立重量过：**单块头失配 ⇒ heads=3 / blocks=3，两支(d)与(c)同时成立**，
+      //    单块头写法并非恒绿。真实理由是**远离基线的程度**（下表为 `client/client.js` 的实测值）：
+      //      真身（未变异）      heads=4 blocks=4  ⇒ 四支全 false（该报红时不红才算失败）
+      //      单块头失配（第 3 个）heads=3 blocks=3  ⇒ c:true d:true  （离基线仅 1 步 ⇒ 留得下"差一个"的余量）
+      //      两块头失配（第 3、4）heads=2 blocks=2  ⇒ c:true d:true  （距基线 4 有 2 步，余量更足）← 本条采用
+      //      全块头失配          heads=0 blocks=0  ⇒ a:true b:false c:true d:true（同时踩中 blocks===0 这级）
+      //    ⇒ 形成「4 → 2 → 0」三级台阶；这样即便将来 `EXPECT_BLOCKS` 再变，本条也不会只剩恰好一步之差。
+      //    （`// x` 尾巴使该行既不算块头也不再配对 `BLOCK_TAIL`，故 heads 与 blocks 同步下降。）
       mutate: (s) => {
         let n = 0
         return s.split('\n').map((l) => {
-          if (/^\s*\(function \(\) \{$/.test(l)) { n += 1; if (n === 3) return l + ' // x' }
+          if (/^\s*\(function \(\) \{$/.test(l)) { n += 1; if (n === 3 || n === 4) return l + ' // x' }
           return l
         }).join('\n')
       },
@@ -221,16 +235,27 @@ const CASES = [
     },
     {
       label: '把 `react.` 全改成 `React.`（未声明的另一别名；只在模块 4 内）',
+      // ⚠ 行范围于 2026-09-28 改为**按 BLOCK_HEAD 动态算**（裁定 #46-D-1）：原写死 `[2118, 2293)`
+      //    锚的是旧模块 5 = web-restart 的行区间；该模块删除后文件只剩 2,210 行 ⇒ 原范围**整体越界**，
+      //    变异退化成 no-op。写死行号在这里本来就是错的（它随任何一次编辑腐）。
+      //    选块依据（实测，不是推断）：全文件只有**块 3（:1890 复制会话 ID）与块 4（:2067 Session log）**
+      //    里有小写 `react.`（各 3 处）；块 1/2 用的是已声明的大写 `React.`（132 / 87 处）⇒ 指块 3 必生效、且**只**报块 3。
+      //    ⚠ 将来若块 3 消失（像本次 web-restart 那样），本变异会以「变异未生效」报红 —— 那正是要人来看的信号，
+      //    不要改成"跳过"。
       mutate: (s) => {
         const lines = s.split('\n')
-        for (let i = 2118; i < 2293 && i < lines.length; i += 1) lines[i] = lines[i].replace(/(^|[^A-Za-z0-9_$.])react\s*\./g, '$1React.')
+        const heads = []
+        lines.forEach((l, i) => { if (/^\s*\(function \(\) \{$/.test(l)) heads.push(i) })
+        const from = heads[2]
+        const to = heads.length > 3 ? heads[3] : lines.length
+        for (let i = from; i < to; i += 1) lines[i] = lines[i].replace(/(^|[^A-Za-z0-9_$.])react\s*\./g, '$1React.')
         return lines.join('\n')
       },
       expectMissing: { blocks: 1, alias: 'React' },
     },
     {
-      label: '【惰性对照】只改注释 ⇒ 一个块都不许报缺',
-      mutate: (s) => s.replace('// ===== 模块 4', '// ===== 模块 4（本注释被本门自测替换，语义不变）'),
+      label: '【惰性对照】只改注释（模块 3 的节注释）⇒ 一个块都不许报缺',
+      mutate: (s) => s.replace('// ===== 模块 3：Session log', '// ===== 模块 3：Session log（本注释被本门自测替换，语义不变）'),
       expectMissing: { blocks: 0, alias: null },
     },
 ]
@@ -254,7 +279,7 @@ if (selftest) {
     const hitAlias = wantAlias !== null && rr.blocks.some((b) => b.missing.includes(wantAlias))
     let ok
     if (c.expectSplitFailure) {
-      ok = rr.blocks.length === 0 || rr.unclosed.length > 0 || rr.blocks.length !== EXPECT_BLOCKS || rr.heads !== 5
+      ok = rr.blocks.length === 0 || rr.unclosed.length > 0 || rr.blocks.length !== EXPECT_BLOCKS || rr.heads !== EXPECT_BLOCKS
       if (!ok) fail(`「${c.label}」破坏了形状锚却没被自保①抓住（切出 ${rr.blocks.length} 块 / 块头 ${rr.heads} 个）`)
     } else if (c.expectMissing.blocks === 0) {
       inertChecked = true
