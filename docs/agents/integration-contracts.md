@@ -30,7 +30,7 @@
 
 被引文件的 SHA256 + 字节数。**任一不匹配 ⇒ 本表对应引用自动作废，必须逐行重核后重新落锚**（重核 = 按 §D.3 重新抽取 + 人工过一遍行号）。
 
-| 被引文件 | SHA256（2026-09-22 重落锚：settings 数据面迁移到条目 Config；**2026-09-24 重落锚①：0.1.12 版本位变动** ⇒ 仅 `package.json` 与 `README.zh.md` 两行；**重落锚②：两 README 的发布承诺句均改文**（版本号改 0.1.12 + 沿革句改为「`0.1.11` 是 `0.1.8` 之后第一个发布的版本」），**其中仅 `README.zh.md` 被锚** ⇒ 仅 `README.zh.md` 一行更新；**2026-09-26 重落锚③：`lib/global-prompt.js` 工作区提示词取值层修复（`workspaceCfg.workspaces` 直接取字典 + 独立 `removed` ref + 只写增量）+ `package.json` 新增 workspace-prompt 门脚本** ⇒ 仅 `lib/global-prompt.js` 与 `package.json` 两行；同一轮把 §A 里 10 处陈旧行号重核纠正）；**2026-09-28 重落锚④：0.1.13 整功能移除「重启服务」**（删 `lib/web-restart.js` 锚行 ⇒ 14 条变 **13 条**；重落 `lib/index.js`/`lib/global-prompt.js`/`lib/request-guard.js`/`client/client.js`/`package.json`/`README.zh.md` 六行；同一轮重抽 §A/§C/§D 中因删除而位移的行号，并给两处历史条目加「0.1.13 整功能移除」标注） | 字节 |
+| 被引文件 | SHA256（2026-09-22 重落锚：settings 数据面迁移到条目 Config；**2026-09-24 重落锚①：0.1.12 版本位变动** ⇒ 仅 `package.json` 与 `README.zh.md` 两行；**重落锚②：两 README 的发布承诺句均改文**（版本号改 0.1.12 + 沿革句改为「`0.1.11` 是 `0.1.8` 之后第一个发布的版本」），**其中仅 `README.zh.md` 被锚** ⇒ 仅 `README.zh.md` 一行更新；**2026-09-26 重落锚③：`lib/global-prompt.js` 工作区提示词取值层修复（`workspaceCfg.workspaces` 直接取字典 + 独立 `removed` ref + 只写增量）+ `package.json` 新增 workspace-prompt 门脚本** ⇒ 仅 `lib/global-prompt.js` 与 `package.json` 两行；同一轮把 §A 里 10 处陈旧行号重核纠正）；**2026-09-28 重落锚④：0.1.13 整功能移除「重启服务」**（删 `lib/web-restart.js` 锚行 ⇒ 14 条变 **13 条**；重落 `lib/index.js`/`lib/global-prompt.js`/`lib/request-guard.js`/`client/client.js`/`package.json`/`README.zh.md` 六行；同一轮重抽 §A/§C/§D 中因删除而位移的行号，并给两处历史条目加「0.1.13 整功能移除」标注）；**2026-09-28 重落锚⑤：0.1.13 发布落 npm 后，按章程 §10.4 第 4 步把两 README 的「最新已发布版本」承诺句改成事实（`0.1.12`→`0.1.13`，等长替换）⇒ 表内只锚 `README.zh.md`，仅该行更新** | 字节 |
 |---|---|---|
 | `lib/index.js` | `1B68C8D32D8814AD3CF4F7EDDDB0DC8BA39335F17678D5F5C38C7EE7F23A95AC` | 5079 |
 | `lib/identity.js` | `87522FC6863EE9E5FE6459906AE335AA09966E09891CC76323B3DAD5F7CF273E` | 2980 |
@@ -43,7 +43,7 @@
 | `lib/log-reposition.js` | `491282BF9C233C5449E96C3F203663B59B63A229AA22CEF48E5931E49CD0B03E` | 280 |
 | `client/client.js` | `40A6DA176D8AA631434C615B60EC7A33E2D84B4920BDBBE5C4D7BF8062F07FB2` | 122219 |
 | `package.json` | `5F7BA4C43DF36F312C0FC726435F5E6E5168043B802C14B4BD0FCD3894BAFF17` | 1866 |
-| `README.zh.md` | `FC91D6769BD875C4860D492E05DA379A6E83CC4488ED12E85B596362142025ED` | 37396 |
+| `README.zh.md` | `D3AB9AB1093E844CADAA71F44FF44B8FD9D9B8550A2F111751D3FE476ABF85BA` | 37396 |
 | `cordis.patch.yml` | `9CB32E70D0C4C98255D83F7BF7D1D67F0B2803E88676B864D9FA84E4A4C2D826` | 285 |
 
 **为什么锚这 13 个**：它们就是本表用行号引用的全部仓库内文件（2026-09-22 调整：删去已不存在的 `lib/ui-config.js`——设置通道迁移后该文件已删除；2026-09-28 调整：删去随 0.1.13「重启服务」整功能移除的 `lib/web-restart.js`；`lib/prompt-literal.js` 自 2026-09-18 起在表内）。**`README.md` 未锚**（本表只用行号引 `README.zh.md`；`README.md` 的一致性由 `pnpm verify` 的双语版本断言守）。**`docs/agents/**` 自身不锚**（本表是锚的**持有者**，自锚会自引用）。
