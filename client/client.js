@@ -1582,6 +1582,17 @@ collect('identity', apply);
 
     var tabState = useState('global');
     var tab = tabState[0], setTab = tabState[1];
+    var pageRef = React.useRef(null);
+    // 切页把根滚回顶部（§200.4-5）：滚动归外壳单一所有，本插件不自带滚动容器，
+    // 故不归零 shell 的 scrollTop，只用 scrollIntoView 让根的最上沿进入视野（必要时才滚）。
+    function setTabSafely(next) {
+      setTab(next);
+      if (pageRef.current && typeof pageRef.current.scrollIntoView === 'function') {
+        // #57-C-3① 裁定：用 'start' 而不是 'nearest' —— nearest 只做最小滚动，
+        // 当页面根比视口高（工作区/组页展开后就会）时它根本不滚，切页后要往下滚很久才看到内容。
+        pageRef.current.scrollIntoView({ block: 'start' });
+      }
+    }
 
     var gSnap = scope.getSnapshot();
     var gInitial = (gSnap && gSnap.value && typeof gSnap.value === 'object') ? gSnap.value : {};
@@ -1783,7 +1794,7 @@ collect('identity', apply);
       });
     }
 
-    return React.createElement('div', { className: 'dsw-page' },
+    return React.createElement('div', { className: 'dsw-page', ref: pageRef },
       React.createElement('div', { className: 'dsw-card', tabIndex: -1 },
         React.createElement('header', { className: 'dsw-head' },
           React.createElement('div', { className: 'dsw-title-row' },
@@ -1795,7 +1806,7 @@ collect('identity', apply);
 
         React.createElement('div', { className: 'dsw-scope-note' }, t('scopeOrder')),
 
-        React.createElement(TabBar, { t: t, tab: tab, onTab: setTab }),
+        React.createElement(TabBar, { t: t, tab: tab, onTab: setTabSafely }),
 
         tab === 'global'
           ? React.createElement('div', { className: 'dsw-stack', onKeyDown: onGlobalKeyDown },
@@ -1909,6 +1920,10 @@ collect('identity', apply);
     var initContent = typeof record.content === 'string' ? record.content : '';
     var initFiles = Array.isArray(record.files) ? record.files : [];
     var initSessions = Array.isArray(record.sessions) ? record.sessions : [];
+    // #57-C-2② 会话勾选延迟：record.sessions 是宿主快照，勾一下要等往返回来才变 ⇒ 受控复选框
+    // 会先弹回旧态。这里给 sessions 一份本地权威值：点击即时生效，写入在防抖窗口后合并发出。
+    var sessionsState = useState(initSessions);
+    var sessions = sessionsState[0], setSessions = sessionsState[1];
 
     var enabledState = useState(initEnabled);
     var enabled = enabledState[0], setEnabled = enabledState[1];
@@ -1923,6 +1938,10 @@ collect('identity', apply);
     var nameErrState = useState(null);
     var nameErr = nameErrState[0], setNameErr = nameErrState[1];
     var lastSavedRef = useRef({ enabled: initEnabled, content: initContent });
+    // 会话勾选的本地权威值 + 待落盘值与防抖 disposer（#57-C-2②）
+    var sessionsRef = useRef(initSessions);
+    var pendingSessionsRef = useRef(null);
+    var sessionsTimerRef = useRef(null);
 
     // 组名可能被外部改名（另一处写入）：只在本地没在改名时跟随。
     useEffect(function () { if (!renaming) setNameDraft(groupKey); }, [groupKey, renaming]);
@@ -1965,7 +1984,59 @@ collect('identity', apply);
       return gs;
     }
     function onFilesChange(newFiles) { writeGroups(subRecord(groupKey, function (r) { r.files = newFiles; })); }
-    function onSessionsChange(nextSessions) { writeGroups(subRecord(groupKey, function (r) { r.sessions = nextSessions; })); }
+
+    // #57-C-2② 会话勾选：本地乐观态先落地，写入防抖合批（连续勾选只发最后一份），
+    // 收起 / 失焦 / 卸载前 flush，写失败回退到上次已确认值并报错（不吞）。
+    function flushSessions() {
+      if (sessionsTimerRef.current) { try { sessionsTimerRef.current(); } catch (e) {} sessionsTimerRef.current = null; }
+      var pending = pendingSessionsRef.current;
+      if (!pending) return Promise.resolve();
+      pendingSessionsRef.current = null;
+      // #57-C-3② 窄窗：勾选后 300ms 内该组被删 ⇒ 本行已卸载、清理副作用仍会 flush，
+      // 而 subRecord 会在已删除的键上重建一条只有 sessions 的僵尸记录。
+      // 下笔前先看最新 groups 里该键是否还在；不在就丢弃，不写、不报错。
+      if (!Object.prototype.hasOwnProperty.call(readGroups(), groupKey)) return Promise.resolve();
+      return Promise.resolve(gpScope.set('groups', subRecord(groupKey, function (r) { r.sessions = pending; })))
+        .then(function () { sessionsRef.current = pending; })
+        .catch(function (e) {
+          console.warn('[dsh-global-prompt] group sessions write failed', e);
+          // 回退：本地权威值退到上次已落盘值，受控复选框随之复位——失败必须可见
+          var back = Array.isArray(record.sessions) ? record.sessions : [];
+          sessionsRef.current = back;
+          setSessions(back);
+          setToast({ type: 'err', text: t('saveError') });
+        });
+    }
+    function onSessionsChange(nextSessions) {
+      var next = Array.isArray(nextSessions) ? nextSessions.slice() : [];
+      sessionsRef.current = next;
+      setSessions(next);
+      pendingSessionsRef.current = next;
+      if (sessionsTimerRef.current) { try { sessionsTimerRef.current(); } catch (e) {} }
+      sessionsTimerRef.current = ctx.timeout(function () { sessionsTimerRef.current = null; flushSessions(); }, 300);
+    }
+
+    // #57-C-2② 宿主快照回灌：无在途写入时才跟随（有 pending 时本地值权威，避免旧快照把勾选弹回去）。
+    useEffect(function () {
+      if (pendingSessionsRef.current) return;
+      var host = Array.isArray(record.sessions) ? record.sessions : [];
+      var cur = sessionsRef.current;
+      if (host.length === cur.length && host.every(function (id, i) { return id === cur[i]; })) return;
+      sessionsRef.current = host;
+      setSessions(host);
+    }, [record]);
+
+    // 失焦（切窗口/切标签页）与卸载前必须 flush，不能丢最后一次勾选。
+    useEffect(function () {
+      function onBlur() { flushSessions(); }
+      document.addEventListener('visibilitychange', onBlur);
+      window.addEventListener('blur', onBlur);
+      return function () {
+        document.removeEventListener('visibilitychange', onBlur);
+        window.removeEventListener('blur', onBlur);
+        flushSessions();
+      };
+    }, []);
 
     function save() {
       if (saving) return;
@@ -2023,7 +2094,7 @@ collect('identity', apply);
     var countClass = 'dsw-count' + (count > charLimit() ? ' dsw-count-error' : (count > charWarnAt() ? ' dsw-count-warn' : ''));
     var disabled = !enabled;
     var dirty = enabled !== lastSavedRef.current.enabled || content !== lastSavedRef.current.content;
-    var members = Array.isArray(record.sessions) ? record.sessions : [];
+    var members = sessions;
     var rowFiles = Array.isArray(record.files) ? record.files : [];
     var scopeKey = GROUP_FILE_SCOPE + groupKey;
     var rowFileStatus = Array.isArray(fsStatusByScope[scopeKey]) ? fsStatusByScope[scopeKey] : [];
@@ -2048,7 +2119,7 @@ collect('identity', apply);
       expandable: true,
       keepContentWhenOpen: true,
       collapsedContent: collapsed,
-      onToggle: function () { onToggleOpen(!open); },
+      onToggle: function () { if (open) flushSessions(); onToggleOpen(!open); },
       expandOnRowClick: true,
     },
       React.createElement('div', { className: 'dsw-group-body', onKeyDown: onKeyDown },
@@ -2170,7 +2241,7 @@ collect('identity', apply);
       React.createElement('div', { className: 'dsw-groups-list' }, keys.map(function (key) {
         var rec = (groups[key] && typeof groups[key] === 'object') ? groups[key] : {};
         return React.createElement(GroupRow, {
-          key: key + '|' + (rec.enabled === true ? '1' : '0') + '|' + (Array.isArray(rec.files) ? rec.files.length : 0) + '|' + (Array.isArray(rec.sessions) ? rec.sessions.length : 0),
+          key: key + '|' + (rec.enabled === true ? '1' : '0') + '|' + (Array.isArray(rec.files) ? rec.files.length : 0),
           t: t, ctx: ctx, gpScope: gpScope, groupKey: key, record: rec,
           liveSessions: liveSessions, fsStatusByScope: fsByScope,
           renaming: renamingKey === key,
@@ -2227,23 +2298,23 @@ collect('identity', apply);
   }
 
   var CSS = [
-    '.dsw-page{--dsw-bg-page:var(--dsw-alias-bg-base);--dsw-bg-card:var(--dsw-alias-bg-layer-1);--dsw-border-l1:var(--dsw-alias-border-l1);--dsw-border-l2:var(--dsw-alias-border-l2);--dsw-text-title:var(--dsw-alias-label-primary);--dsw-text-body:var(--dsw-alias-label-secondary);--dsw-text-sub:var(--dsw-alias-label-tertiary);--dsw-success-text:var(--dsw-alias-state-success-primary);--dsw-warn:var(--dsw-alias-state-warn-label);--dsw-error:var(--dsw-alias-state-error-primary);--dsw-alias-button-primary-fill:var(--dsw-alias-state-business-primary);--dsw-alias-button-primary-hover:var(--dsw-static-deepseek-400);background:var(--dsw-bg-page);min-height:100%;display:flex;flex-direction:column;padding:0;box-sizing:border-box;font-family:var(--dsw-font-family);color:var(--dsw-text-title);font-size:14px;line-height:1.6;transition:background .2s ease,color .2s ease}',
-    '.dsw-card{width:100%;flex:1;background:var(--dsw-bg-card);border:0;border-radius:12px;box-shadow:var(--dsw-elevation-panel);padding:24px 28px;display:flex;flex-direction:column;gap:18px;box-sizing:border-box;transition:background .2s ease,box-shadow .2s ease}',
-    '.dsw-card>*{flex-shrink:0}',
+    '.dsw-page{--dsw-bg-page:var(--dsw-alias-bg-base);--dsw-bg-card:var(--dsw-alias-bg-layer-1);--dsw-border-l1:var(--dsw-alias-border-l1);--dsw-border-l2:var(--dsw-alias-border-l2);--dsw-text-title:var(--dsw-alias-label-primary);--dsw-text-body:var(--dsw-alias-label-secondary);--dsw-text-sub:var(--dsw-alias-label-tertiary);--dsw-success-text:var(--dsw-alias-state-success-primary);--dsw-warn:var(--dsw-alias-state-warn-label);--dsw-error:var(--dsw-alias-state-error-primary);display:flex;flex-direction:column;gap:12px;width:100%;max-width:760px;padding:0;box-sizing:border-box;font-family:var(--dsw-font-family);color:var(--dsw-text-title);font-size:14px;line-height:1.6;transition:color .2s ease}',
+    '.dsw-card{width:100%;border:0;padding:0;display:flex;flex-direction:column;gap:12px;box-sizing:border-box}',
     '.dsw-head{display:flex;flex-direction:column;gap:6px}',
     '.dsw-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
     '.dsw-title-group{display:flex;align-items:center;gap:8px;min-width:0}',
-    '.dsw-title{margin:0;font-size:20px;font-weight:600;color:var(--dsw-text-title);line-height:1.3;transition:color .2s ease}',
-    '.dsw-badge{height:24px;line-height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}',
-    '.dsw-page .dsw-badge-on{background:var(--dsw-alias-state-success-tertiary);color:var(--dsw-alias-state-success-primary)}',
-    '.dsw-page .dsw-badge-off{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
-    '.dsw-desc{margin:0;font-size:14px;line-height:1.6;color:var(--dsw-text-body);transition:color .2s ease}',
-    '.dsw-scope-note{font-size:12px;line-height:1.6;color:var(--dsw-text-sub);background:var(--dsw-alias-interactive-bg-hover);border-radius:8px;padding:8px 12px;transition:color .2s ease,background .2s ease}',
-    '.dsw-tabs{display:flex;gap:8px;border-bottom:1px solid var(--dsw-alias-border-l2)}',
-    '.dsw-tab{height:34px;padding:0 14px;border:none;border-radius:8px 8px 0 0;background:transparent;color:var(--dsw-text-sub);font-family:var(--dsw-font-family);font-size:14px;font-weight:500;cursor:pointer;transition:background .2s ease,color .2s ease;border-bottom:2px solid transparent}',
-    '.dsw-tab:hover{color:var(--dsw-text-title);background:var(--dsw-alias-interactive-bg-hover)}',
-    '.dsw-tab.active{color:var(--dsw-text-title);border-bottom-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-tertiary)}',
-    '.dsw-stack{display:flex;flex-direction:column;gap:16px}',
+    '.dsw-title{margin:0;font-size:18px;font-weight:600;color:var(--dsw-alias-label-primary);line-height:1.4;transition:color .2s ease}',
+    '.dsw-badge{font-size:12px;font-weight:500;color:var(--dsw-text-sub);white-space:nowrap;font-variant-numeric:tabular-nums}',
+    '.dsw-page .dsw-badge-on{color:var(--dsw-alias-state-success-primary)}',
+    '.dsw-page .dsw-badge-off{color:var(--dsw-text-sub)}',
+    '.dsw-desc{margin:0;font-size:13px;line-height:1.6;color:var(--dsw-alias-label-tertiary);transition:color .2s ease}',
+    '.dsw-scope-note{font-size:12px;line-height:1.6;color:var(--dsw-text-sub);transition:color .2s ease}',
+    '.dsw-tabs{display:flex;align-items:flex-end;gap:22px;border-bottom:0.5px solid var(--dsw-alias-border-l2);margin-top:2px}',
+    '.dsw-tab{position:relative;border:0;padding:7px 1px 9px;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:13px;line-height:20px;cursor:pointer;transition:color .2s ease}',
+    '.dsw-tab:hover,.dsw-tab.active{color:var(--dsw-alias-label-primary)}',
+    ".dsw-tab.active::after,.dsw-tab:focus-visible::after{position:absolute;right:0;bottom:-1px;left:0;height:2px;border-radius:2px 2px 0 0;background:var(--dsw-alias-label-primary);content:''}",
+    '.dsw-tab:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px;border-radius:2px;color:var(--dsw-alias-label-primary)}',
+    '.dsw-stack{display:flex;flex-direction:column;gap:12px}',
     '.dsw-enable{display:flex;align-items:flex-start;gap:12px}',
     '.dsw-switch{position:relative;flex:none;width:40px;height:22px;margin-top:2px;padding:0;border:none;border-radius:999px;background:var(--dsw-alias-bg-layer-2);cursor:pointer;transition:background .2s ease;box-sizing:border-box}',
     '.dsw-switch.on{background:var(--dsw-alias-state-business-primary)}',
@@ -2252,22 +2323,23 @@ collect('identity', apply);
     '.dsw-enable-text{display:flex;flex-direction:column;gap:2px;min-width:0}',
     '.dsw-enable-label{font-size:14px;font-weight:500;color:var(--dsw-text-title);transition:color .2s ease}',
     '.dsw-enable-hint{font-size:12px;color:var(--dsw-text-sub);transition:color .2s ease}',
-    '.dsw-content{display:flex;flex-direction:column;gap:10px;flex:1;min-height:0;transition:opacity .2s ease}',
+    '.dsw-content{display:flex;flex-direction:column;gap:10px;transition:opacity .2s ease}',
     '.dsw-content.dsw-disabled{opacity:.45;pointer-events:none}',
     '.dsw-label-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}',
     '.dsw-label{font-size:14px;font-weight:500;color:var(--dsw-text-title);transition:color .2s ease}',
     '.dsw-count{font-size:12px;color:var(--dsw-text-sub);font-variant-numeric:tabular-nums;transition:color .2s ease}',
     '.dsw-count-warn{color:var(--dsw-warn)}',
     '.dsw-count-error{color:var(--dsw-error)}',
-    '.dsw-area{width:100%;flex:1;min-height:240px;padding:12px;box-sizing:border-box;border:1px solid var(--dsw-border-l2);border-radius:8px;background:var(--dsw-bg-card);font-family:var(--dsw-font-family);font-size:14px;line-height:1.7;color:var(--dsw-text-title);resize:vertical;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease,color .2s ease}',
+    '.dsw-area{width:100%;min-height:200px;padding:12px;box-sizing:border-box;border:1px solid var(--dsw-border-l2);border-radius:8px;background:var(--dsw-bg-card);font-family:var(--dsw-font-family);font-size:14px;line-height:1.7;color:var(--dsw-text-title);resize:vertical;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease,color .2s ease}',
     '.dsw-area::placeholder{color:var(--dsw-text-sub)}',
     '.dsw-area:focus{outline:none;border-color:var(--dsw-border-l2);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-hover-accent)}',
     '.dsw-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px}',
+    '.dsw-autosave{margin-right:auto;font-size:12px;color:var(--dsw-text-sub);transition:color .2s ease}',
     '.dsw-unsaved{font-size:12px;color:var(--dsw-warn);transition:color .2s ease}',
     '.dsw-workspace{display:flex;flex-direction:column}',
-    '.dsw-ws-list{display:flex;flex-direction:column;gap:8px}',
+    '.dsw-ws-list{display:flex;flex-direction:column;gap:10px}',
     '.dsw-ws-badge{flex:none;height:20px;line-height:20px;padding:0 8px;border-radius:999px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary);font-size:12px;font-weight:500;white-space:nowrap;margin-left:8px}',
-    '.dsw-ws-body{display:flex;flex-direction:column;gap:14px;padding:4px 0 4px 2px}',
+    '.dsw-ws-body{display:flex;flex-direction:column;gap:12px;padding:2px 0 6px 2px}',
     '.dsw-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:56px 24px;text-align:center;color:var(--dsw-text-sub)}',
     '.dsw-empty-title{font-size:14px;font-weight:500;color:var(--dsw-text-body)}',
     '.dsw-empty-hint{font-size:12px;color:var(--dsw-text-sub);max-width:380px;line-height:1.6}',
@@ -2300,8 +2372,10 @@ collect('identity', apply);
     '.dsw-groups-head{display:flex;align-items:center;gap:8px}',
     '.dsw-groups-count{font-size:12px;color:var(--dsw-text-sub);font-variant-numeric:tabular-nums}',
     '.dsw-group-add{display:flex;gap:8px;flex:1;min-width:0}',
-    '.dsw-groups-list{display:flex;flex-direction:column;gap:8px}',
-    '.dsw-group-body{display:flex;flex-direction:column;gap:14px;padding:4px 0 4px 2px}',
+    '.dsw-groups-list{display:flex;flex-direction:column;gap:12px}',
+    '.dsw-group-members{font-size:12px;color:var(--dsw-text-sub)}',
+    '.dsw-group-card{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:10px 12px;background:var(--dsw-bg-card)}',
+    '.dsw-group-body{display:flex;flex-direction:column;gap:12px;padding:2px 0 6px 2px}',
     '.dsw-group-name{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.dsw-group-name-input{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-bg-card);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:13px}',
     '.dsw-group-name-input:focus{outline:none;border-color:var(--dsw-alias-border-l2);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-hover-accent)}',
@@ -2315,7 +2389,6 @@ collect('identity', apply);
     '.dsw-session-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}',
     '.dsw-session-title{font-size:13px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.dsw-session-meta{font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-    '.dsw-session-members{font-size:12px;color:var(--dsw-text-sub)}',
     '',
   ].join('\n');
 

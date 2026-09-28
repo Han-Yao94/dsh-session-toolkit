@@ -209,6 +209,33 @@ jobs:
           node-version: 20
       - run: node scripts/group-prompt.contract.assert.mjs --selftest
 
+  settings-layout-assert:
+    # 设置页布局不变式门（`client/client.js` 内的 CSS 与 DOM 结构 + 平台 native 观感对齐）：
+    # 六格判据 = 页面根/卡片不得是拉伸件 · 不得出现嵌套滚动组合 · 标签条为原生文字标签形态
+    # （无填充背景 + 行底 0.5px `var(--dsw-alias-border-l2)` + `::after` 2px 激活条）· 标题/副标题
+    # 取平台字号量（18/13）且颜色直取平台 token · 切页归位（`setTabSafely` 内 `setTab(...)` +
+    # 受守卫的 `scrollIntoView({block:'start'})`，且接到 TabBar 的 onTab）· 会话勾选（处理函数同步
+    # 提交本地状态、不直接写宿主，且宿主快照回灌有 pending 守卫）。
+    # `--selftest` 必须带：只跑真实对照就漏掉了「门自己还能不能红」这半边，且本门**九份变异各点名
+    # 一条判据**，把「机制有效（点名报红 + 无连带翻转）」与「真绿变红」分开报（有两条判据基线本来就
+    # 红时，只证「注入生效让点名判据报出这条」，不得读作自证通过）。
+    #
+    # 为什么本门**可以**挂 CI（判据同 `:198 group-prompt-contract` 那段：红是否可被合理驳回）：
+    # ① 零外部输入 —— 只读本仓库 `client/client.js`，破坏全在 os.tmpdir() 副本上做，不读已装
+    #    profile、不读 harness checkout、不打任何端口；
+    # ② 属**契约门** —— 它的红只有一个动作（修 `client/client.js` 或修门），没有"这次可以放过"的
+    #    合法理由。判据边界：**只证结构，不证时序与视觉**（如 A5 的归位是否真的发生、A6 的延迟
+    #    是否真的消失，需人类复验）。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/settings-layout.assert.mjs --selftest
+
   publish-npm:
     # 断言不再能报红与断言失败同样致命，故发布依赖 selftest 与两道契约门（裁定 #35/#53：
     # 静默的契约断裂曾被发布出去，只挂在 push/PR 上的门拦不住发布，必须在发布路径上）。
@@ -222,7 +249,7 @@ jobs:
     #     （对照：`:46 dependency-skew.measure.mjs --selftest` 与 `:47 dsh-log-ui.drift.mjs --selftest`
     #      确实在 `selftest` job 里跑 —— 它们是**不需要外部 checkout**的自证步骤；本条之所以例外在
     #      「不进任何步骤」，理由是上面的"可被合理驳回"，与它们能否在 CI 跑无关。）
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert]
     # ⚠️ `request-guard` **加入 needs**（D 的判断；按上面的分界判据，它是契约门而非探测器，故不冲突）：
     #   判据同上：**红是否可被合理驳回**。
     #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），
