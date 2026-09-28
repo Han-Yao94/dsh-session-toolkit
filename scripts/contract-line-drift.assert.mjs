@@ -593,8 +593,22 @@ function render(res, { quiet, all }) {
     } else {
       L.push(`  ⚠ 帧漂移告警：${TABLE} 在工作区已改、但基线是 ${res.frameWarn.baseline}（= HEAD ${res.frameWarn.head}）。`);
       L.push('    表里的行号对应的是**工作区那份表**、不是基线那份 ⇒ 基线帧也不是表所书写的帧。');
-      L.push('    ⚠ 且代码基线（HEAD）与现场逐字相同 ⇒ **映射是恒等映射**，本门这次判定按构造');
-      L.push('      **无法检查表里的任何行号**（表怎么错都测不出来）⇒ 空转，不是「表已核对」。');
+      // ⚠「恒等映射」这句必须是**条件式的实话**（裁定 #86⒟ → #87③ 定的形态，2026-09-28）。
+      //   原先这两行在 table-drift 分支里**无条件**打印「按构造无法检查任何行号 ⇒ 空转」，
+      //   而同一次运行的输出里就能出现 `lib/peer-message.js：改动块 9 个` 与 `陈旧 12（涉及 lib/peer-message.js）`
+      //   —— 那正是「有东西可查、而且查到了」的实证。把「12 条实证发现」说成「空转」是**假话**，
+      //   且会训练读者忽略本门的真判据。
+      //   改法为什么不保留 `files.length === 0 / > 0` 两条分支：恒等映射成立的条件 = 视野内被引文件
+      //   **两版之间一处改动都没有**；而 `table-drift` 分支只在「活件表与 HEAD 不同」时进入
+      //   （`tableDrift` 仅在 `tablePath === TABLE` 时被 push）⇒ 「表脏 且 那些文件零改动」这一组合
+      //   在当前结构下**无法从参数或夹具构造**（唯一构造法是把仓内那张表临时改脏 = 动他人文件，已被禁）。
+      //   留下一个不可触发、只能当装饰的分支违反「不可达分支不得留在门里」⇒ 写成**恒真且更精确**的一句：
+      //   两个类别一次讲清（两版有改动的被引文件 = 判据真在跑，其余文件 = 恒等映射、按构造无从检查）。
+      L.push(`    ⚠ 视野内被引文件两版之间确有改动的 ${res.frameWarn.files.length} 个：`
+        + (res.frameWarn.files.length ? `${res.frameWarn.files.join('、')}` : '（无）'));
+      L.push('      ⇒ 这些文件的映射与陈旧/越界判据是**真在跑**的（见下方读数）；');
+      L.push('        只有「两版之间一处改动都没有」的文件才落**恒等映射**（那部分按构造无从检查，见 BL-053），');
+      L.push('        不是「本门这次空转、表已核对」——有改动的那部分本来就查得到、也查到了。');
     }
     L.push('');
   }
@@ -1175,20 +1189,31 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
       expectRaw: (s) => !s.includes('越界/笔误明细') && !/越界\/笔误[^\n]*= [1-9]/.test(s),
     },
     {
-      name: 'BL-051② 裸形降序区间（裸形 + 冒号前缀写法 `:2741-2671`，同行有可归属的带路径引用）⇒ 必须被计数并报出',
+      name: 'BL-051② 裸形降序区间（裸形 + 冒号前缀写法 `:145-141`，同行有可归属的带路径引用）⇒ 必须被计数并报出',
       // ⚠ 这一格必须写成**真表同形**：`file.js:NNN` 在前、反引号裸号在后。
-      //   我第一版写成 `` `lib/peer-message.js` `` + `` `:2741-2671` `` ⇒ 带路径形被替换成空格后
+      //   我第一版写成 `` `lib/peer-message.js` `` + `` `:2741-2671` ``（**历史形状**，非本格注入值：
+      //   那是这条缺陷在真表里的原始代码；本格注入的是 `:145-141`，见下方 `mutate`）⇒ 带路径形被替换成空格后
       //   裸号**归属不到**任何文件，虽仍报降序，但明细打印的是 `null`（归属这一半没被考到）。
       //   现在同时断言「明细里出现该文件名」⇒ 归属与「报得出降序」两件事一起被钉住。
-      mutate: () => '| 文件 | 说明 |\n|---|---|\n| `lib/peer-message.js:140` | 原写 `:2741-2671` 降序 |\n',
+      // ⚠ 被引对象与行号都要**与工作区解耦**（裁定 #84②）—— 这一格连红两次，两个成因都不是判据本身：
+      //   ① 原写法：同行带路径形 = `` `lib/peer-message.js:140` ``，同桌裸号 = `:2741`（超过该文件 371 行）
+      //      ⇒ **不是那个成因**（实测 `越界/笔误 = 0`，因为越界只按带路径形的行号判），真成因是
+      //      **已陈旧 = 1**：`lib/peer-message.js` 在工作区被 B 改过 ⇒ 基线帧（HEAD）与现盘不一致，
+      //      `exit 1` 由陈旧判据产生 ⇒ 正反两条同时红（反向对照要证「不报降序」，被另一个判据打了）。
+      //      ⇒ 被引对象必须是**已入库**（`gitPath` 只认已入库路径，`:815`）且**工作区未改**
+      //      （`git diff --quiet HEAD -- <f>`）的文件，否则任何一格都会带上无关判据的红。
+      //   ② 我第一版新造 `scripts/fixtures/bare-range-target.js` ⇒ 落「不在视野」被整条跳过（未入库）。
+      //   现用 `lib/auto-resume.js`：已入库 · 工作区未改 · 193 行 ⇒ `:140` 与裸号 `:145-141` 都在界内。
+      //   两格只差区间方向（145-141 降序 ↔ 140-141 升序），故「报降序」不是无条件噪声。
+      mutate: () => '| 文件 | 说明 |\n|---|---|\n| `lib/auto-resume.js:140` | 原写 `:145-141` 降序 |\n',
       expectExit: 0,
       expectText: null,
       expectReversedRanges: 1,
-      expectRaw: (s) => s.includes('降序区间明细') && s.includes('lib/peer-message.js') && !s.includes('null  「2741-2671」'),
+      expectRaw: (s) => s.includes('降序区间明细') && s.includes('lib/auto-resume.js') && !s.includes('null  「145-141」'),
     },
     {
       name: 'BL-051② 反向对照：同一行把区间写成升序 `:140-141` ⇒ 不得报降序（证明「报降序」不是无条件噪声）',
-      mutate: () => '| 文件 | 说明 |\n|---|---|\n| `lib/peer-message.js:140` | 现为 `:140-141` 升序 |\n',
+      mutate: () => '| 文件 | 说明 |\n|---|---|\n| `lib/auto-resume.js:140` | 现为 `:140-141` 升序 |\n',
       expectExit: 0,
       expectText: null,
       expectReversedRanges: 0,
@@ -1270,7 +1295,15 @@ function selftest(tablePath, baseline, refRoot = ROOT) {
   {
     const copy = join(dir, 'frame-warn.md');
     writeFileSync(copy, original);
-    const prevBaseline = findDiffBaseline() // 与第二组同一真源：不写死 HEAD~1;
+    // 本行**独立**取「有 diff 的祖先」：`findDiffBaseline()` 会在历史里找第一个与 HEAD 有 diff 的
+    // 修订（实测常为 HEAD~1，但不写死 —— HEAD~1 与 HEAD 无 diff 时它会继续往前找，写死会让本组
+    // 变成恒等映射、告警块永不出现）。
+    // ⚠️ 勿再写成「与第二组同一真源」：第二组（端到端真身）自 2026-09-28 裁定 #78② 起已改为
+    //    **装置自带的冻结夹具对**（基线 = `scripts/fixtures/client.groups-pre-fix.js` 的 blob
+    //    `b0d0e9c2a79f53311e3e7aa6e0352dd64d64037c` + 脚本内构造的现盘侧），
+    //    它**不依赖 HEAD 历史、也不再调 git**；只有本组（帧错配）还需要「HEAD 与某个祖先有 diff」。
+    //    两者真源现已不同，这条注释（旧文写「与第二组同一真源：不写死 HEAD~1」）是过期表述。
+    const prevBaseline = findDiffBaseline();
     const checks = [];
     const renderQuietly = (bl) => {
       const r = evaluate({ tablePath: copy, baseline: bl, refRoot });

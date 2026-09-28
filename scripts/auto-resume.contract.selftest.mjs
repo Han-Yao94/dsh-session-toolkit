@@ -170,13 +170,67 @@ function revList(...args) {
  * 该字面量必须在当前 lib/auto-resume.js 中存在，否则视为门无法定位本次修复 → EXIT=3。
  */
 const BAD_FINGERPRINT = 'function normalizeEntry'
-/** 回归扫描上限（防止仓库异常时无限回溯）。 */
-const MAX_LEGACY_SCAN = 50
 
 /**
- * 取"已知坏代码"（形状归一化之前的版本）。取值判据是**内容指纹**，不是提交哈希：
- * HEAD 不含指纹 → 直接用 HEAD；否则回溯找最近一个把指纹写进历史的提交，取其父版本。
- * 回溯一步即够（修复提交自身的父版本就是坏版本），循环只是"未提交时的一步短路 + 异常兜底"。
+ * 在指定提交的对象里找 `rel`，返回树根（`<sha>^{tree}`）。
+ * 用途 = 用**路径级** diff 过滤 `git log -S`（`-- <rel>` 是「整棵树里有路径变化」，
+ * 会把别的文件的改动一并带进来；本门要的只是「这个文件的这一行变了」）。
+ */
+function treeOf(rev) {
+  const outPath = path.join(WORK, 'tree.out')
+  const errPath = path.join(WORK, 'tree.err')
+  const outFd = openSync(outPath, 'w')
+  const errFd = openSync(errPath, 'w')
+  try {
+    const r = spawnSync('git', ['-C', ROOT, 'rev-parse', `${rev}^{tree}`],
+      { stdio: ['ignore', outFd, errFd], env: process.env })
+    if (r.status !== 0) return null
+    return readFileSync(outPath, 'utf8').trim() || null
+  } finally {
+    closeSync(outFd)
+    closeSync(errFd)
+  }
+}
+
+/** `git log --format=%H -S <needle> --reverse -- <rel>`：**全史**找内容变化的提交，最早的在前。 */
+function logPicks(needle, rel) {
+  const outPath = path.join(WORK, 'log.out')
+  const errPath = path.join(WORK, 'log.err')
+  const outFd = openSync(outPath, 'w')
+  const errFd = openSync(errPath, 'w')
+  try {
+    const r = spawnSync(
+      'git',
+      ['-C', ROOT, 'log', '--format=%H', '--reverse', '-S', needle, 'HEAD', '--', rel],
+      { stdio: ['ignore', outFd, errFd], env: process.env },
+    )
+    if (r.status !== 0) return { ok: false, why: readFileSync(errPath, 'utf8').trim() || `git exit ${r.status}` }
+    return { ok: true, revs: readFileSync(outPath, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean) }
+  } finally {
+    closeSync(outFd)
+    closeSync(errFd)
+  }
+}
+
+/** 全史提交数（可观测性：这个数会一直涨，而判据不依赖它）。 */
+function totalCommits() {
+  const rl = revList('HEAD')
+  return rl.ok ? rl.revs.length : -1
+}
+
+/**
+ * 取"已知坏代码"（形状归一化之前的版本）。判据是**内容指纹**，不是提交哈希、也不是提交位置：
+ * - HEAD 不含指纹 → 直接用 HEAD（修复尚未提交）；
+ * - 否则用 `git log -S`（全史、按路径）找**引入**该指纹的提交 C，坏版本取 `C^`。
+ *
+ * ⚠️ 历史教训（2026-09-28 裁定 #85 修）：这里原本是 `git rev-list -n 50 HEAD` 的位置窗口。
+ * 窗口随仓库增长必然失效 —— 引入提交 `96751aa`（2026-09-10）在 87 个提交时恰好落到第 50 位之外，
+ * 负对照取不到 ⇒ `EXIT=3`、这条门在发布路径上变红；此前 `f336ca7` 已是同一形态的第一次。
+ * 「内容锚定优先于位置窗口」是本仓库既有法则（裁定 #81①），故此处不得回退成窗口扫描；
+ * 若将来要加上限，则**截断且未命中也必须 `EXIT 3`**。
+ *
+ * 自检注入口（只服务负向对照，默认路径不依赖它）：环境变量 `DSH_ARV_BAD_COMMIT`
+ * 跳过搜索、直接把指定提交当作 C（同样要过下面的内建断言）。
  */
 function resolveLegacyControl() {
   const rel = 'lib/auto-resume.js'
@@ -185,23 +239,43 @@ function resolveLegacyControl() {
   if (!head.text.includes(BAD_FINGERPRINT)) {
     return { ok: true, source: `HEAD:${rel}`, rev: 'HEAD', text: head.text, note: 'HEAD 本身即坏代码（修复尚未提交）' }
   }
-  const rl = revList('-n', String(MAX_LEGACY_SCAN), 'HEAD')
-  if (!rl.ok) return { ok: false, why: `git rev-list 失败 —— ${rl.why}` }
-  for (const rev of rl.revs) {
-    const cur = gitBlob(`${rev}:${rel}`)
-    if (!cur.ok || !cur.text.includes(BAD_FINGERPRINT)) continue // 该提交尚未引入修复，或该提交没有此文件
-    const parent = gitBlob(`${rev}^:${rel}`)
-    if (!parent.ok) return { ok: false, why: `修复提交 ${rev} 的父版本不可读 —— ${parent.why}` }
-    if (parent.text.includes(BAD_FINGERPRINT)) continue // 指纹早已存在，说明修复不在此提交
-    return {
-      ok: true,
-      source: `${rev}^:${rel}`,
-      rev: `${rev}^`,
-      text: parent.text,
-      note: `HEAD 已含修复指纹（${BAD_FINGERPRINT}），回溯到引入它的提交 ${rev}，取其父版本作坏对照`,
-    }
+  const total = totalCommits()
+  const injected = process.env.DSH_ARV_BAD_COMMIT || null
+  let intro = injected
+  if (!intro) {
+    const lg = logPicks(BAD_FINGERPRINT, rel)
+    if (!lg.ok) return { ok: false, why: `git log -S 失败 —— ${lg.why}` }
+    intro = lg.revs.findIndex((c) => {
+      const t = treeOf(c)
+      if (!t) return true // 该对象不可达 ⇒ 无法过滤，退回「不过滤」的保守判断
+      const tPrev = treeOf(`${c}^`)
+      if (!tPrev) return true
+      return t !== tPrev
+    })
+    intro = intro >= 0 ? lg.revs[intro] : null
   }
-  return { ok: false, why: `最近 ${MAX_LEGACY_SCAN} 个提交里找不到引入「${BAD_FINGERPRINT}」的提交（工作区是否已含修复但未提交？请先提交）` }
+  if (!intro) {
+    return { ok: false, why: `全史（${total} 个提交）都找不到引入「${BAD_FINGERPRINT}」的提交（工作区是否已含修复但未提交？请先提交）` }
+  }
+  // ── 内建断言（裁定 #85 要求）：锚错了会把"坏代码"取成修复后的版本 ⇒ 那一腿永真 ⇒ 假绿。
+  const at = gitBlob(`${intro}:${rel}`)
+  if (!at.ok) return { ok: false, why: `提交 ${intro} 里读不到 ${rel} —— ${at.why}` }
+  if (!at.text.includes(BAD_FINGERPRINT)) {
+    return { ok: false, why: `内建断言不成立：提交 ${intro} 的 ${rel} 里**没有**指纹「${BAD_FINGERPRINT}」⇒ 锚错了（该提交不是引入修复的提交）` }
+  }
+  const par = gitBlob(`${intro}^:${rel}`)
+  if (!par.ok) return { ok: false, why: `引入提交 ${intro} 的父版本里读不到 ${rel}（可能没有父提交）—— ${par.why}` }
+  if (par.text.includes(BAD_FINGERPRINT)) {
+    return { ok: false, why: `内建断言不成立：引入提交 ${intro} 的**父版本也已含**指纹「${BAD_FINGERPRINT}」⇒ 锚错了（取到的不是"修复前"的版本，负对照会退化成永真）` }
+  }
+  return {
+    ok: true,
+    source: `${intro}^:${rel}`,
+    rev: `${intro}^`,
+    text: par.text,
+    note: `HEAD 已含修复指纹（${BAD_FINGERPRINT}）；全史（${total} 个提交）搜到引入它的提交 ${intro}，取其父版本作坏对照`
+      + (injected ? `［⚠️ 本次锚点由 DSH_ARV_BAD_COMMIT 注入，非默认搜索路径］` : ''),
+  }
 }
 
 function materialize(name, text) {
@@ -354,13 +428,22 @@ const sameSet = (a, b) => a.length === b.length && [...a].sort().join() === [...
 
 // ------------------------------------------------------------------ 主流程
 const argv = process.argv.slice(2)
+const USAGE = '用法：node scripts/auto-resume.contract.selftest.mjs [--code <file>] [--bad-commit <sha>]'
 let requestedPath = path.join(ROOT, 'lib', 'auto-resume.js')
-if (argv[0] === '--code') {
-  if (!argv[1]) { console.error('用法：node scripts/auto-resume.contract.selftest.mjs [--code <file>]'); process.exit(EXIT.USAGE) }
-  requestedPath = path.resolve(argv[1])
-} else if (argv.length > 0) {
-  console.error(`未知参数 ${argv[0]}；用法：node scripts/auto-resume.contract.selftest.mjs [--code <file>]`)
-  process.exit(EXIT.USAGE)
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i]
+  if (a === '--code') {
+    if (!argv[i + 1]) { console.error(`用法错：--code 缺参数。${USAGE}`); process.exit(EXIT.USAGE) }
+    requestedPath = path.resolve(argv[++i])
+  } else if (a === '--bad-commit') {
+    // 只服务负向对照（裁定 #85）：把"引入提交"钉死成指定值，让锚点错法与找不到两种情形可被构造。
+    // 默认路径不依赖它；注入值同样要过内建断言，过不了就 EXIT 3。
+    if (!argv[i + 1]) { console.error(`用法错：--bad-commit 缺参数。${USAGE}`); process.exit(EXIT.USAGE) }
+    process.env.DSH_ARV_BAD_COMMIT = argv[++i]
+  } else {
+    console.error(`未知参数 ${a}；${USAGE}`)
+    process.exit(EXIT.USAGE)
+  }
 }
 
 if (!existsSync(requestedPath)) {

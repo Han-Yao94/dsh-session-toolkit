@@ -116,6 +116,29 @@ jobs:
           node-version: 20
       - run: node scripts/prompt.contract.selftest.mjs
 
+  # 文档引用契约门（`scripts/prompt-contract.assert.mjs`，2026-09-28 裁定 #82④ 批准挂 CI）：
+  # 扫 `docs/agents/**/*.md` 里三类**机器可判定**的失真 —— C1「路径:行号」引用越界/倒序/本仓无此文件 ·
+  # C2「路径 + N 行」字面量与现盘不符（豁免词 `会漂`/`现测`/`原写` 与「同行提交号」两条例外）·
+  # C3 已废口径（followup 投递）仍被当作现行通道宣称。
+  # ⚠️ **弱视野（必须记下，不得假装它是全量检查）**：CI 语料里 `git ls-files docs` 只有 1 份 .md
+  #    （`docs/agents/` 全树命中 `.gitignore`）⇒ 本门在 CI 只看到 1 份文档、花名册绝大多数条目走
+  #    「跳过 N 条登记项（所在文件不在视野）」。它在这里能证明的是**「能跑、不崩、代码库自身形态自洽」**，
+  #    不是「全部协作文档无陈旧引用」。全量判定只能在本机工作树上做。
+  # 保留 `fetch-depth: 0`：本门自身只读工作树、**不依赖 git 历史**（与 `anchor-contract` 的 `rev^` 不同），
+  #    此处按裁定 #82④ 的 CI 规矩保留，代价是 fetch 变慢。
+  prompt-contract-assert:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/prompt-contract.assert.mjs
+
   request-guard:
     # Origin 守卫门（`lib/request-guard.js`）：47 条用例（四种输入 × 两种绑定模式）× 4 条结构断言
     # × 7 条变异 × 真 originGuard 挂临时 HTTP 服务器的薄层。`--selftest` 必须带：只跑真实对照
@@ -303,7 +326,7 @@ jobs:
     #     （对照：`:46 dependency-skew.measure.mjs --selftest` 与 `:47 dsh-log-ui.drift.mjs --selftest`
     #      确实在 `selftest` job 里跑 —— 它们是**不需要外部 checkout**的自证步骤；本条之所以例外在
     #      「不进任何步骤」，理由是上面的"可被合理驳回"，与它们能否在 CI 跑无关。）
-    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert, session-picker-assert, group-new-submit-assert]
+    needs: [verify, selftest, auto-resume-contract, anchor-contract, prompt-contract, prompt-contract-assert, request-guard, scope-identifiers, workspace-prompt-guard, group-prompt-contract, settings-layout-assert, session-picker-assert, group-new-submit-assert]
     # ⚠️ `request-guard` **加入 needs**（D 的判断；按上面的分界判据，它是契约门而非探测器，故不冲突）：
     #   判据同上：**红是否可被合理驳回**。
     #     · `clamp-call` 属探测器 —— 它的红在合法重构下**可被合理讨论**（改个常数即可），
