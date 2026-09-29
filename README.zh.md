@@ -225,14 +225,7 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 
 迭代源码时可安装 checkout(`dsh plugin --profile web add <源码路径>`,使用 pnpm `link:` 依赖),或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
 
-验证门(仅限源码 checkout 内运行——`scripts/` 不随发布包分发;无需构建步骤,也无需安装依赖):
-
-```powershell
-pnpm check    # 语法门 —— 对全部随包 JS 跑 node --check
-pnpm verify   # 另加打包契约 —— 入口可达、import 声明完整、双语 README 版本一致
-```
-
-`pnpm verify` 断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。升级 harness 时使用的 DSH 集成点清单见 `docs/agents/integration-contracts.md`。
+维护者的验证门——对全部随包 JS 跑语法检查,另加打包契约(入口可达、import 声明完整、双语 README 版本一致)——针对源码 checkout 运行。它**不在本仓库里,也不随发布包分发**:本仓库只跟踪 `lib/`、`client/`、`cordis.patch.yml`、两份 README 与 `package.json`。该门断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。
 
 ### 分享与安装
 
@@ -244,12 +237,7 @@ pnpm verify   # 另加打包契约 —— 入口可达、import 声明完整、�
 - **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
 - **tarball**:`pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`。
 
-运行时依赖(`@deepseek-ai/schemastery`(下限 `^3.18.4`——`volatile()` 自 3.18.3 起才有)、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`)声明在 `dependencies`,随安装自动拉取;平台模块(`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`)为 `peerDependencies`,由 DSH 宿主提供。harness 提供的包一律**只写一个前置版本代**——`^0.2.0-rc.1`:caret 区间不跨 minor,而 semver 还额外要求"比较器里必须有一个指明**候选人自身 `major.minor.patch`** 的前置版本",这正是当初要写成 `^0.1.2-alpha.5 || ^0.1.6-alpha.2` 并集的原因,也正是 §F 偏斜的根因(插件拿到自己的旧副本、宿主在跑新版本)。既然 `dsh-v0.2.0-rc.1` 已是最低支持版本,旧的并集成员已删除:**今后每次 harness 换代都必须同步抬高这些区间**,而 `node scripts/dependency-skew.measure.mjs --profile <DSH_HOME>/profiles/web`(期望 `SKEW_COUNT=0`)就是告诉你该抬了的那个检查。区间只在安装期生效——重新安装并重启 GUI 之后再量。`@deepseek-ai/dsh-client-ui-slots` 刻意不声明:`slots` 服务由 web shell 播种,npm peer 声明是死重。已验证:打包 tgz 的干净安装可完整解析所有 import(不依赖本地 junction)。另有两条**安装侧**工具(需要外部 checkout/profile,因此不挂 CI,见契约表 §D/§E/§F):
-
-```bash
-node scripts/dependency-skew.measure.mjs --profile <DSH_HOME>/profiles/web   # §F：期望 SKEW_COUNT=0
-node scripts/dsh-log-ui.drift.mjs --harness <deepseek-harness 路径>          # §E：复刻件漂移
-```
+运行时依赖(`@deepseek-ai/schemastery`(下限 `^3.18.4`——`volatile()` 自 3.18.3 起才有)、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`)声明在 `dependencies`,随安装自动拉取;平台模块(`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`)为 `peerDependencies`,由 DSH 宿主提供。harness 提供的包一律**只写一个前置版本代**——`^0.2.0-rc.1`:caret 区间不跨 minor,而 semver 还额外要求"比较器里必须有一个指明**候选人自身 `major.minor.patch`** 的前置版本",这正是当初要写成 `^0.1.2-alpha.5 || ^0.1.6-alpha.2` 并集的原因,也正是解析偏斜的根因(插件拿到自己的旧副本、宿主在跑新版本)。既然 `dsh-v0.2.0-rc.1` 已是最低支持版本,旧的并集成员已删除:**今后每次 harness 换代都必须同步抬高这些区间**,而针对已装 profile 做一次依赖解析偏斜测量(期望 `SKEW_COUNT=0`)就是告诉你该抬了的那个检查。区间只在安装期生效——重新安装并重启 GUI 之后再量。`@deepseek-ai/dsh-client-ui-slots` 刻意不声明:`slots` 服务由 web shell 播种,npm peer 声明是死重。已验证:打包 tgz 的干净安装可完整解析所有 import(不依赖本地 junction)。另有两条**安装侧**检查(需要外部 checkout/profile,因此不挂 CI):针对已装 profile 的依赖解析偏斜测量,与针对 harness checkout 的冻结复刻件漂移审计。两者都在维护者的工作副本里。
 
 ---
 
@@ -293,11 +281,11 @@ node scripts/dsh-log-ui.drift.mjs --harness <deepseek-harness 路径>          #
 - client 半为手工维护的单文件 IIFE 包;新增功能需同步维护 `lib/` 与 `client/client.js` 两处。
 - **client 半的「标识符作用域」没有任何门覆盖。** 调 `react.useState` 的块必须同时 `require('react')`：`react/jsx-runtime` **不提供**它，而缺绑定时组件渲染即抛错；**slot 渲染器会把那个抛错吞掉并丢掉整条 entry**，于是症状是「按钮静默地不见了」，而不是任何人看得见的报错。**这一形态从 2026-09-18（`3e44642` 加了 hooks 调用却没加 require）活到 2026-09-22**，穿过了全部的门。
 - **收到的跨会话消息在界面上是「收起的一行」,不是可读的正文。** `send_to_session` 按**生产者归属**记录投递——`source: { kind: 'agent-message', form: 'relay', senderSessionId }`——而客户端对**所有**非人类来源都走它对 turn trigger 的渲染,那一行**默认收起,点开才见正文**。写成 `kind: 'user'` 会像人类消息一样 inline 展开,但会把**另一个 Agent 的话记成用户说的**——而那正是 V4 唯一规定为「生产者拥有」的字段。归属优先;**点那一行即可读到正文**(正文首行仍自带发件人)。
-- **图标名属于集成面。** DSH 0.1.7 把 `@deepseek-ai/dsh-client-ui-primitives` 的图标从 `IconXxxOutline<尺寸>` 改名为 `IconXxxOutlineRegular` / `IconXxxOutlineMedium`(1 px 与 1.3 px 笔画;artwork 保留旧默认 `size`),因此 client 半必须使用**目标 harness** 的名字。不存在的名字求值为 `undefined`,而 `React.createElement(undefined, …)` 会抛错,导致**该组件子树整片空白、而它的导航行照常出现**(注册与渲染是两件事)。**这一形态对其余所有门都是静默的**——语法门、打包门、锚门当时全绿。用 `node scripts/primitives-export.assert.mjs --harness <checkout>` 守它:exit 1 会逐条列出插件引用了、而已装 harness 并未导出的成员。
-- 平移的 Session log 入口依赖官方 `sessionLogDownload` controller 接口,且复刻官方 0.1.6 的「⋯ 更多操作」菜单形态;**它是冻结的复刻件**:DSH 升级后跑一次 `node scripts/dsh-log-ui.drift.mjs --harness <checkout>`——它按同一组锚点双向审计,漂移即非零退出(§E)。**有意的分叉**:官方 header 菜单此后多了第二项(`feedback`),本复刻件只保留 download;这是**已裁定的状态、不是待决问题**——门把它记成 note 而非失败,正因为"跟随上游新增能力"本身是一个决定,而该决定已于 2026-09-22 作出:**不跟随**。只有确实想要那个 feedback 入口时才需要重开。
+- **图标名属于集成面。** DSH 0.1.7 把 `@deepseek-ai/dsh-client-ui-primitives` 的图标从 `IconXxxOutline<尺寸>` 改名为 `IconXxxOutlineRegular` / `IconXxxOutlineMedium`(1 px 与 1.3 px 笔画;artwork 保留旧默认 `size`),因此 client 半必须使用**目标 harness** 的名字。不存在的名字求值为 `undefined`,而 `React.createElement(undefined, …)` 会抛错,导致**该组件子树整片空白、而它的导航行照常出现**(注册与渲染是两件事)。**这一形态对其余所有门都是静默的**——语法门、打包门、锚门当时全绿。维护者的门守这一条:它把插件引用到的成员列出来,任何一个未被已装 harness 导出即报错。
+- 平移的 Session log 入口依赖官方 `sessionLogDownload` controller 接口,且复刻官方 0.1.6 的「⋯ 更多操作」菜单形态;**它是冻结的复刻件**:DSH 升级后由维护者对着 harness checkout 重跑一次漂移审计——按同一组锚点双向核对,有漂移就报出来,而不是静默通过。**有意的分叉**:官方 header 菜单此后多了第二项(`feedback`),本复刻件只保留 download;这是**已裁定的状态、不是待决问题**——门把它记成 note 而非失败,正因为"跟随上游新增能力"本身是一个决定,而该决定已于 2026-09-22 作出:**不跟随**。只有确实想要那个 feedback 入口时才需要重开。
 - `toPlainText` 宽松斜体匹配可能误删非格式位置的成对 `*`(如 `a * b * c`);对 agent 生成消息可接受,边界收紧为可选优化。
 - 聚合 `inject` 并集会等待所列全部服务;某 profile 缺一服务会拖慢整包 apply(web profile 当前齐备)。
-- harness 提供的依赖区间是前置版本并集;改完区间必须重跑 `pnpm install`,并在装好的 profile 上跑 `node scripts/dependency-skew.measure.mjs --profile <DSH_HOME>/profiles/web`(期望 `SKEW_COUNT=0`;`DE-INSTANCE` 表示同版本不同实例,§F 判定为可接受)。
+- harness 提供的依赖区间是前置版本并集;改完区间必须重跑 `pnpm install`,并在装好的 profile 上做一次依赖解析偏斜测量(期望 `SKEW_COUNT=0`;`DE-INSTANCE` 表示同版本不同实例,判定为可接受)。
 - `ctx.get('agentDefaultModel')`、`sessionTitle`、`workspaceRegistry` 改为调用时惰性解析,缺失时降级为 cwd/路径寻址;`tools` 与 `webServer` 改用 `ctx.inject` 等待就绪——loader 并发创建条目,apply 时刻的 `ctx.get` 没有顺序保证,晚到会让功能永久静默消失。
 - **引用文件在组装路径预热** —— `readPromptFiles` 每次组装对每个引用文件做一次 `statSync`,仅在 mtime/大小变化时读盘;单文件与合计字节预算避免超大文件阻塞组装或撑爆提示词,状态投影也只在变化时写入。client 端 `files` 即时保存(`onWsFilesChange` / `save`)。
 - **UI 旋钮来自同一条目的 `client.*`** —— 浏览器半经 `configForms.get('session-toolkit')` 读 `client.*` 字段(表单不可用时回落冻结的 `UI_FALLBACK`)。client 条目本身仍拿不到 cordis 行配置,但设置的读取已不再需要 host 镜像:同一条目 Config 两侧都可见。
