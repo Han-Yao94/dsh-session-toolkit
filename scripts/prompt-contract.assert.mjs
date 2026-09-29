@@ -166,7 +166,42 @@ const ALLOW_EXTERNAL = [
   // 元语言 / 负向对照站点
   { file: 'docs/agents/board/d.md', token: 'lib/web-restart.js:5', note: '该文件**已随「重启服务」整功能删除**，原文正是在记录它「已消失」' },
   { file: 'docs/agents/board/d.md', token: 'client/clinet.js:160', note: '负向对照：故意拼错的文件名（`clinet`）' },
-];// ── 作废句式（C3）─────────────────────────────────────────────────────────────
+  // 被引的文件在**工作区外**（`~/.dsh/skills/`，另一个交付物），用裸 basename 引用
+  { file: 'docs/agents/board/d.md', line: 6442, token: 'protocol.md:132-146', why: '工作区外的另一个交付物', note: '实指 ~/.dsh/skills/agent-team-orchestration/references/protocol.md（§106-D.5 引它的参数映射表）' },
+  { file: 'docs/agents/board/d.md', line: 6460, token: 'protocol.md:132-146', why: '工作区外的另一个交付物', note: '同上（§106-D.7 边界清单里复查同一张表；同一记号跨两行各一处）' },
+  { file: 'docs/agents/board/d.md', line: 6421, token: 'CHANGELOG.md:14', why: '工作区外的另一个交付物', note: '实指 agent-team-orchestration 的 CHANGELOG（§106-D.4① 引原文判措辞过头）' },
+  { file: 'docs/agents/board/d.md', line: 6421, token: 'SKILL.md:165', why: '工作区外的另一个交付物', note: '同上（§106-D.4① 指出的同句也出现在 SKILL.md）' },
+  { file: 'docs/agents/board/d.md', line: 6426, token: 'CHANGELOG.md:10', why: '工作区外的另一个交付物', note: '同上（§106-D.4② 的措辞勘误）' },
+  { file: 'docs/agents/board/d.md', line: 6441, token: 'scripts/dispatch-lint.mjs:22', why: '工作区外的另一个交付物', note: '实指该 skill 自带脚本（§106-D.5 指出它注释里用 `lib/sub/deep.js` 举例）' },
+  { file: 'docs/agents/board/d.md', line: 6591, token: 'scripts/anchor-check.mjs:144', why: '工作区外的另一个交付物', note: '实指 ~/.dsh/skills/pre-commit-independent-review/scripts/anchor-check.mjs（§106-D.11 复述 A 的派发原文；同一行 4 处并列，逐条登记）' },
+  { file: 'docs/agents/board/d.md', line: 6591, token: 'SKILL.md:116', why: '工作区外的另一个交付物', note: '同上（同一行的第 2 个引用）' },
+  { file: 'docs/agents/board/d.md', line: 6591, token: 'anchor-check.mjs:163', why: '工作区外的另一个交付物', note: '同上（同一行的第 3 个引用）' },
+  { file: 'docs/agents/board/d.md', line: 6591, token: 'scripts/anchor-check.mjs:155', why: '工作区外的另一个交付物', note: '同上（同一行的第 4 个引用）' },
+  // A 裁定（§288.4）：跨三片共 13 条同类引用由 D 统一登记，不要求各作者改自己板片的写法 ——
+  // 理由：板片里的「路径:行号」是复核证据的原始形态，改成模糊写法会降低可复核性；豁免表在 scripts/（D 写权）。
+  { file: 'docs/agents/board/a.md', line: 7136, token: 'scripts/anchor-check.mjs:144', why: '工作区外的另一个交付物', note: 'A §288 复核我的 skill 时引的（写者=A）' },
+  { file: 'docs/agents/board/a.md', line: 7138, token: 'SKILL.md:116', why: '工作区外的另一个交付物', note: '同上（写者=A）' },
+  { file: 'docs/agents/board/a.md', line: 7155, token: 'SKILL.md:116', why: '工作区外的另一个交付物', note: '同上（写者=A）' },
+  { file: 'docs/agents/board/c.md', line: 1933, token: 'anchor-check.mjs:163', why: '工作区外的另一个交付物', note: 'C §135 非作者复核时引的（写者=C）' },
+  { file: 'docs/agents/board/c.md', line: 2018, token: 'anchor-check.mjs:163', why: '工作区外的另一个交付物', note: '同上（写者=C）' },
+  // A 裁定（2026-09-29，`#skill-D-fix-2` 追加项一）：C §136 与 A §291 又引了 5 个同类站点，仍由 D 统一登记。
+  // ⚠ 站点的真实数量是 **5** 而 A 报的是「2 条红」—— 差在「引用传播」：
+  //   A 在 §291 里复述了那两条红点的原文（含 `paths:行号`），复述行本身又被本门抽成新站点 ⇒ 2 → 4。
+  //   再叠加 A 自曝实验里那一行 `scripts/nosuch-xyz.mjs:12`，共 5。⇒ 5 条全部登记，一条一站点（消费逻辑见 :541-552）。
+  // 2026-09-29 清理（A 裁定 #skill-D-104①，2026-09-29 19:5x）：删 7 条已陈旧条目 —— C 改写 17 处后 6 条 c.md 条目行号漂移、1 条 d.md 条目（§110-D.2 表重做时该站点被改成占位写法）。删除依据 = 门自报「[外部豁免已陈旧] … 请从 ALLOW_EXTERNAL 移除」×7。删后 46 → 39 条。
+  { file: 'docs/agents/board/a.md', line: 7391, token: 'scripts/anchor-check.mjs:258', why: '工作区外的另一个交付物', note: 'A §291 复述红点原文时的**二次引用**（写者=A）—— 这一条是「引用传播」的实证' },
+  { file: 'docs/agents/board/a.md', line: 7391, token: 'scripts/anchor-check.mjs:46', why: '工作区外的另一个交付物', note: '同上（同一行的第 2 个引用）' },
+  { file: 'docs/agents/board/a.md', line: 7402, token: 'scripts/nosuch-xyz.mjs:12', why: '工作区外的另一个交付物', note: 'A §291 三组对照实验的**示意行**（该文件本来就不存在，是实验靶子）' },
+  // D 自己的 §110-D（#skill-D-fix-2 交付载荷）新引入 5 个站点，仍由 D 统一登记（写者=D 本人）。
+  // ⚠ 这是「引用传播」的**第三次**重现：§110-D.2 复述那 5 条登记时又把被登记的记号写成新站点（3 处落在同一行）。
+  //   一条一站点（消费逻辑见 :541-552）—— 同 token 跨行的必须逐条给 `line`。
+  { file: 'docs/agents/board/d.md', line: 6922, token: 'SKILL.md:117-119', why: '工作区外的另一个交付物', note: '实指 ~/.dsh/skills/pre-commit-independent-review/SKILL.md（§110-D.1 判据⑥ 引它作「两处都写明了」的证据）' },
+  { file: 'docs/agents/board/d.md', line: 6958, token: 'scripts/anchor-check.mjs:258', why: '工作区外的另一个交付物', note: '§110-D.2 复述本门那 5 条登记内容时引的（同一行 3 处并列的第 1 处）' },
+  { file: 'docs/agents/board/d.md', line: 6958, token: 'scripts/anchor-check.mjs:46', why: '工作区外的另一个交付物', note: '同上（同一行的第 2 处）' },
+  { file: 'docs/agents/board/d.md', line: 6958, token: 'scripts/nosuch-xyz.mjs:12', why: '工作区外的另一个交付物', note: '同上（同一行的第 3 处；该文件本来就不存在，是 A 对照实验的靶子）' },
+];
+
+// ── 作废句式（C3）─────────────────────────────────────────────────────────────
 // 「默认 inject」必须与「默认」同现才算**宣称**；「全队只有你用」是旧口径的独有字面。
 const DEPRECATED = [
   { re: /默认\s*`?inject`?/, label: '默认 inject' },
