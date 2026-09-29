@@ -416,7 +416,16 @@ jobs:
             "@deepseek-ai/schemastery": 3.18.3
           YAML
 
-          pnpm install --ignore-scripts --store-dir "$STORE"
+          # ⚠ 必须显式 --no-frozen-lockfile（裁定 #rc1-D-12①，D 本地三组实测；依据见 board/d.md §104-D）：
+          #   GitHub Actions 设 CI=true ⇒ pnpm 在非 TTY 下对这个命令**默认启用 frozen 语义**，于是
+          #   上面刚追加的 7 条 overrides 与锁文件记录不符 ⇒ ERR_PNPM_LOCKFILE_CONFIG_MISMATCH（真机 run 36511811286 复现）。
+          #   两步的语义**故意不同**，不是笔误：
+          #     #5 rc1 基座  = 锁文件必须**原样**成立（--frozen-lockfile）——它代表「本仓声明与锁文件自洽」；
+          #     #6 alpha 基座 = **故意**构造「版本被 overrides 改写」的对照树 ⇒ 必须允许 pnpm 重算锁文件，
+          #                    否则这棵树根本建不起来，D 断言（两基座归一化对拍）就永远跑不到。
+          #   本地实测（pnpm 12.4.1 · 与 CI 同版本）：CI=true 无此 flag ⇒ EXIT 1；CI=true 加此 flag ⇒ EXIT 0；
+          #   不加 flag 且无 CI 变量 ⇒ EXIT 0（这就是本机重放漏判的原因：装置少设了 CI=true 这一维）。
+          pnpm install --no-frozen-lockfile --ignore-scripts --store-dir "$STORE"
 
           git -c user.name=ci -c user.email=ci@local commit --quiet -a --amend --no-edit
           git status --porcelain
