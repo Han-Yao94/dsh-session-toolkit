@@ -343,9 +343,49 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # 为什么本 job 独有这一段（其他 14 个 job 都没有）：见 D 的 #rc1-D-11 依据与实测（board/d.md §103-D）。
+      # ① 只有本 job 跑 `pnpm install`（其余 job 只用 node/npm）⇒ CI 首跑在第一棵基座就 `pnpm: command not found`（exit 127）；
+      # ② 本仓 `package.json` 没有 `packageManager` 字段 ⇒ 单跑 `corepack enable` 不知道装哪个版本，必须显式给版本；
+      # ③ **不用 corepack**：Node 20 自带的 corepack 0.33.0 与 pnpm 12.x 不兼容（shim 要 `…/12.4.1/bin/pnpm.cjs`，
+      #    而 pnpm 12 只发 `bin/pnpm.mjs`）—— 本机用 Node 20.19.5 同版本实测复现，详见 §103-D.4。改用 npm 装到 job 私有前缀：
+      #    零第三方 action、版本钉死、且与 runner 上可能预装的 pnpm **不可能撞车**（本步立刻按绝对路径强校验）。
+      # ④ 版本 12.4.1 的选择依据（不是凭印象）：`pnpm-lock.yaml` 的 `lockfileVersion: '9.0'` 与
+      #    `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` / `overrides` 键面都由它支持 —— 本机同版本实测
+      #    `--frozen-lockfile --lockfile-only` EXIT 0 且锁文件帧逐位未变（§103-D.3）。
+      - name: 准备 pnpm 12.4.1（npm 装到 job 私有前缀；不用第三方 action）
+        run: |
+          set -euo pipefail
+          export npm_config_cache="${RUNNER_TEMP}/npm-cache"
+          npm install -g --prefix "${RUNNER_TEMP}/pnpm" pnpm@12.4.1
+          echo "${RUNNER_TEMP}/pnpm/bin" >> "$GITHUB_PATH"
+          # 同一段里立刻把前缀放进 PATH：这样「后面几步用哪一个」在本步就已确定，
+          # 不依赖 GITHUB_PATH 生效时机（重跑本步时也不会被 runner 预装的 pnpm 抢先）。
+          export PATH="${RUNNER_TEMP}/pnpm/bin:$PATH"
+          PNPM_BIN="${RUNNER_TEMP}/pnpm/bin/pnpm"
+          hash -r
+          echo "pnpm 来自 $(command -v pnpm || echo '(PATH 里找不到 pnpm！)')"
+          if [ ! -x "$PNPM_BIN" ]; then
+            echo "::error::npm 没有装出 ${PNPM_BIN}"
+            exit 1
+          fi
+          if [ "$("$PNPM_BIN" --version)" != "12.4.1" ]; then
+            echo "::error::pnpm 版本不是 12.4.1，实测 = $("$PNPM_BIN" --version)"
+            exit 1
+          fi
+          # 强校验「后面几步用的那一个」就是本步装的这一个（防止与 runner 预装的 pnpm 撞车后静默用错）
+          if [ "$(command -v pnpm)" != "$PNPM_BIN" ]; then
+            echo "::error::PATH 里的 pnpm = $(command -v pnpm)，但本步期望它 = ${PNPM_BIN}（下一步会用到错的那个）"
+            exit 1
+          fi
+          echo "pnpm $("$PNPM_BIN" --version) 就绪（$(command -v pnpm)）"
 
       - name: 建 rc1 基座（LOCKFILE-FROZEN）
         run: |
