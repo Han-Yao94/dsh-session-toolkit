@@ -1665,7 +1665,12 @@ collect('identity', apply);
           var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
           var saved = typeof v.content === 'string' && v.content === val;
           setGAutoSave(saved ? 'saved' : 'saving');
-          gLastSavedRef.current = { enabled: gEnabled, content: val };
+          // 只有写入真的落地（读回一致）才更新「已保存」基准；否则会把未保存的 val 记成
+          // 基准，gDirty 随即误判为「已保存」，切换页面时静默丢掉这次编辑。
+          // enabled 从基准原样继承：本次只写了 content，不许把渲染期本地值混进基准
+          // （裁定 #29-② 甲；与下方 saveGlobalEnabled 里那条逐字同构），否则基准可能
+          // 宣称一个从未被快照确认过的状态 ⇒ gDirty 误报干净 ⇒ 静默丢编辑。
+          if (saved) gLastSavedRef.current = { enabled: gLastSavedRef.current.enabled, content: val };
         }).catch(function () { setGAutoSave('saving'); });
       }, 500);
     }
@@ -1779,10 +1784,15 @@ collect('identity', apply);
     var rows = [];
     var seenPath = {};
     for (var ai = 0; ai < activeList.length; ai++) {
-      var ap = activeList[ai].path;
+      // 元素级判空：路由投影是宿主数据，元素可能为 null/非对象（曾整页崩在 .path 上）
+      var actItem = activeList[ai];
+      if (!actItem || typeof actItem !== 'object') continue;
+      var ap = actItem.path;
+      // path 非非空字符串的行无法作为 key 也无法承载「移除」，直接跳过（不要拿 undefined 当键去重）
+      if (typeof ap !== 'string' || ap === '') continue;
       if (seenPath[ap]) continue;
       seenPath[ap] = true;
-      rows.push({ path: ap, sessionCount: activeList[ai].sessionCount, active: true });
+      rows.push({ path: ap, sessionCount: actItem.sessionCount, active: true });
     }
     var configuredPaths = Object.keys(workspaces);
     for (var ci = 0; ci < configuredPaths.length; ci++) {
