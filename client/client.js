@@ -17,8 +17,11 @@ window.__ModuleLoader__.load({
     var STATE_URL = '/api/session-toolkit/state';
     // 组提示词的文件读取状态 scopeKey（与 host 半 lib/global-prompt.js 的 'group:' + 组名 对齐）
     var GROUP_FILE_SCOPE = 'group:';
+    // 上限只有一个真源：config 缺席时用这个回落值，超限文案也从它现算（#8 之前文案硬编码 4000，
+    // 判定却走 charLimit()，配置一改两者就会永久不一致）。
+    var DEFAULT_IDENTITY_CHAR_LIMIT = 4000;
     var UI_FALLBACK = {
-      identityCharLimit: 4000,
+      identityCharLimit: DEFAULT_IDENTITY_CHAR_LIMIT,
       copyFeedbackMs: 1600,
     };
     var uiCfg = Object.assign({}, UI_FALLBACK);
@@ -103,10 +106,24 @@ window.__ModuleLoader__.load({
           emit();
         });
       }
+      // #44：原先两处写成 `refresh().then(...)` —— 调用发生在同步上下文里，refresh 若同步抛出
+      // （例如 `typeof fetch === 'function'` 但 fetch 不可调用），异常根本走不到 .then/.catch，
+      // 直接冒泡成 unhandledRejection；而链尾本身也没有 rejection 处理器。
+      // 这里把「调用 + 续跑」整体包进 Promise 链：同步抛与异步拒都被同一个 catch 接住，
+      // 且失败后仍然按 listeners 的情况决定是否续跑，不让一次失败终止轮询。
+      function refreshThen(onDone) {
+        return Promise.resolve()
+          .then(function () { return refresh(); })
+          .then(function () { if (typeof onDone === 'function') onDone(); })
+          .catch(function (e) {
+            console.warn('[dsh-session-toolkit] state refresh failed', e);
+            if (typeof onDone === 'function') onDone();
+          });
+      }
       function poll(ctx) {
         cancelTimer = ctx.timeout(function () {
           cancelTimer = null;
-          refresh().then(function () { if (listeners.length > 0) poll(ctx); });
+          refreshThen(function () { if (listeners.length > 0) poll(ctx); });
         }, POLL_MS);
       }
       return {
@@ -114,7 +131,7 @@ window.__ModuleLoader__.load({
         subscribe: function (ctx, listener) {
           listeners.push(listener);
           if (listeners.length === 1 && typeof ctx.timeout === 'function') {
-            refresh().then(function () { if (listeners.length > 0) poll(ctx); });
+            refreshThen(function () { if (listeners.length > 0) poll(ctx); });
           }
           return function () {
             var idx = listeners.indexOf(listener);
@@ -164,6 +181,9 @@ window.__ModuleLoader__.load({
   // 设置值变化后下一次渲染即生效（此前是 apply 时一次性捕获，配置改动永远不生效）。
   function charLimit() { return uiCfg.identityCharLimit; }
   function charWarnAt() { return Math.floor(uiCfg.identityCharLimit * 0.8); }
+  // 超限文案里的数字必须与 charLimit() 同源现算（#8）：文案本身只留 {n} 占位，
+  // 两处 save 都用这一个函数取值，杜绝「判定走 config、文案写死」的永久分叉。
+  function overLimitText() { return t('overLimitMsg').replace('{n}', String(charLimit())); }
 
   var zh = {
     nav: '会话身份',
@@ -191,7 +211,7 @@ window.__ModuleLoader__.load({
     savedToast: '已保存',
     savedInheritToast: '已恢复默认身份',
     saveError: '保存失败',
-    overLimitMsg: '超出 4000 字符上限',
+    overLimitMsg: '超出 {n} 字符上限',
     loading: '加载中…',
     unavailable: '设置服务不可用',
     reset: '重置',
@@ -228,7 +248,7 @@ window.__ModuleLoader__.load({
     savedToast: 'Saved',
     savedInheritToast: 'Restored to default',
     saveError: 'Failed to save',
-    overLimitMsg: 'Exceeds the 4000-char limit',
+    overLimitMsg: 'Exceeds the {n}-char limit',
     loading: 'Loading…',
     unavailable: 'Settings service unavailable',
     reset: 'Reset',
@@ -508,7 +528,7 @@ window.__ModuleLoader__.load({
 
     function save() {
       if (saving) return;
-      if (overLimit) { setToast({ type: 'err', text: t('saveError') + ': ' + t('overLimitMsg') }); return; }
+      if (overLimit) { setToast({ type: 'err', text: t('saveError') + ': ' + overLimitText() }); return; }
       if (!sessionId) { setToast({ type: 'err', text: t('saveError') + ': 会话未就绪' }); return; }
       setSaving(true);
       var next = { enabled: enabled, text: text.trim() };
@@ -560,7 +580,7 @@ window.__ModuleLoader__.load({
 
     function saveDefault() {
       if (saving) return;
-      if (overLimit) { setToast({ type: 'err', text: t('saveError') + ': ' + t('overLimitMsg') }); return; }
+      if (overLimit) { setToast({ type: 'err', text: t('saveError') + ': ' + overLimitText() }); return; }
       setSaving(true);
       var next = { enabled: enabled, text: text.trim() };
       Promise.resolve(scope.set('default', next)).then(function () {
@@ -1610,6 +1630,10 @@ collect('identity', apply);
     // 切页把根滚回顶部（§200.4-5）：滚动归外壳单一所有，本插件不自带滚动容器，
     // 故不归零 shell 的 scrollTop，只用 scrollIntoView 让根的最上沿进入视野（必要时才滚）。
     function setTabSafely(next) {
+      // #27：同值短路——点当前已选中的页签原本会走一遍 setTab + scrollIntoView，
+      // 把已经看好的页面滚回顶部。只加这一条短路，**不动 setTab 的其它行为**
+      // （仍照原样无条件调用；滚动分支与裁定仍按 #57-C-3① 用 'start'）。
+      if (next === tab) return;
       setTab(next);
       if (pageRef.current && typeof pageRef.current.scrollIntoView === 'function') {
         // #57-C-3① 裁定：用 'start' 而不是 'nearest' —— nearest 只做最小滚动，
@@ -1828,6 +1852,11 @@ collect('identity', apply);
       });
     }
 
+    // #26：徽标原先在同一渲染里把 groupEnabledCount() 调了三遍（active / className / 文字），
+    // 三次各自读快照。这里改成「同一渲染内取一次」——**不改 groupEnabledCount 的语义**（仍是
+    // 每次现读 gpScope 快照并数 enabled===true），只是把一次渲染的三处引用收敛到同一个值。
+    var enabledGroupCount = tab === 'group' ? groupEnabledCount() : 0;
+
     return React.createElement('div', { className: 'dsw-page', ref: pageRef },
       React.createElement('div', { className: 'dsw-card', tabIndex: -1 },
         React.createElement('header', { className: 'dsw-head' },
@@ -1835,7 +1864,7 @@ collect('identity', apply);
             React.createElement('div', { className: 'dsw-title-group' },
               React.createElement(primitives.IconGlobeOutlineRegular, { size: 18 }),
               React.createElement('h1', { className: 'dsw-title' }, t('title'))),
-            React.createElement(primitives.Pill, { active: tab === 'group' ? groupEnabledCount() > 0 : gEnabled, className: 'dsw-badge' + ((tab === 'group' ? groupEnabledCount() > 0 : gEnabled) ? ' dsw-badge-on' : ' dsw-badge-off') }, tab === 'group' ? (String(groupEnabledCount()) + ' ' + t('enabledGroups')) : (gEnabled ? t('badgeOn') : t('badgeOff'))))),
+            React.createElement(primitives.Pill, { active: tab === 'group' ? enabledGroupCount > 0 : gEnabled, className: 'dsw-badge' + ((tab === 'group' ? enabledGroupCount > 0 : gEnabled) ? ' dsw-badge-on' : ' dsw-badge-off') }, tab === 'group' ? (String(enabledGroupCount) + ' ' + t('enabledGroups')) : (gEnabled ? t('badgeOn') : t('badgeOff'))))),
           React.createElement('p', { className: 'dsw-desc' }, t('desc'))),
 
         React.createElement('div', { className: 'dsw-scope-note' }, t('scopeOrder')),
@@ -2082,6 +2111,9 @@ collect('identity', apply);
     var sessionsRef = useRef(initSessions);
     var pendingSessionsRef = useRef(null);
     var sessionsTimerRef = useRef(null);
+    // #32：组内「启用本组提示词」开关的在途标记（见 saveEnabled）。不并入 saving，
+    // 因为 saving 还驱动保存按钮的 disabled/文案，复用它会把按钮一起改态。
+    var enabledWriteRef = useRef(false);
 
     // 组名可能被外部改名（另一处写入）：只在本地没在改名时跟随。
     useEffect(function () { if (!renaming) setNameDraft(groupKey); }, [groupKey, renaming]);
@@ -2123,7 +2155,7 @@ collect('identity', apply);
       gs[key] = rec;
       return gs;
     }
-    function onFilesChange(newFiles) { writeGroups(subRecord(groupKey, function (r) { r.files = newFiles; })); }
+    function onFilesChange(newFiles) { writeGroups(subRecord(groupKey, function (r) { r.files = newFiles; }), true); }
 
     // #57-C-2② 会话勾选：本地乐观态先落地，写入防抖合批（连续勾选只发最后一份），
     // 收起 / 失焦 / 卸载前 flush，写失败回退到上次已确认值并报错（不吞）。
@@ -2200,7 +2232,25 @@ collect('identity', apply);
       }).then(function () { setSaving(false); });
     }
     function saveEnabled(next) {
-      var gs = subRecord(groupKey, function (r) { r.enabled = next; });
+      // #32：在途保护。同组 save() 首行就有 `if (saving) return;`，本路径此前没有 ——
+      // 连续点开关会并发发出多次整组写，后一次基于前一次的快照，读回校验因此可能报
+      // 「conflict」或把用户最后一次点击的结果丢掉。
+      // 用独立 ref 而不是复用 saving：saving 还被保存按钮的 disabled 与文案读，复用它会让
+      // 按钮在只切开关时也变灰，属越界改动（§35.5 要求只修这一项）。
+      if (enabledWriteRef.current) return;
+      enabledWriteRef.current = true;
+      // 标记必须在任何可能同步抛的步骤（subRecord 会读快照）之前置上，且只有链尾清它——
+      // 若标志与写盘之间同步抛出，标志会永久卡住，此后这个开关就再也点不动了。
+      // 故同步段整体包起来：同步抛 → 清标志 + 报错，不留悬挂状态。
+      var gs;
+      try {
+        gs = subRecord(groupKey, function (r) { r.enabled = next; });
+      } catch (e) {
+        enabledWriteRef.current = false;
+        console.warn('[dsh-global-prompt] group enable write failed', e);
+        setToast({ type: 'err', text: t('saveError') });
+        return;
+      }
       Promise.resolve(gpScope.set('groups', gs)).then(function () {
         var s2 = gpScope.getSnapshot();
         var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
@@ -2212,7 +2262,8 @@ collect('identity', apply);
         } else {
           setToast({ type: 'err', text: t('saveError') + ': ' + t('conflict') });
         }
-      }).catch(function () { setToast({ type: 'err', text: t('saveError') }); });
+      }).catch(function () { setToast({ type: 'err', text: t('saveError') }); })
+        .then(function () { enabledWriteRef.current = false; });
     }
     function commitRename() {
       var name = nameDraft.trim();
@@ -2224,7 +2275,22 @@ collect('identity', apply);
       delete gs[groupKey];
       gs[name] = rec;
       setNameErr(null);
-      writeGroups(gs).then(function () { onRenamed(name); onRenamingChange(false); });
+      // 第二参传 false：本路径的可见报错位是**行内的 nameErr**（下面读回失败时 setNameErr），
+      // 再让 writeGroups 弹一次 toast 就是同一件事双报。模块3 的新建/删除组传 true 是因为
+      // 它们那个组件没有行内报错位、才有必要借 setAddErr。
+      writeGroups(gs, false).then(function () {
+        // 读回确认才关改名态：否则写失败时 UI 会显示「已改名」而盘上还是旧名。
+        // 与模块 2 的 save()/saveEnabled() 同款（读回校验 + 失败落行内报错），
+        // 这里是模块 2 的重命名路径，沿用同一页的 nameErr 槽位。
+        var s2 = gpScope.getSnapshot();
+        var v2 = (s2 && s2.value && typeof s2.value === 'object') ? s2.value : {};
+        var gs2 = (v2.groups && typeof v2.groups === 'object') ? v2.groups : {};
+        if (!Object.prototype.hasOwnProperty.call(gs2, groupKey) && gs2[name] !== undefined) {
+          onRenamed(name); onRenamingChange(false);
+        } else {
+          setNameErr(t('saveError'));
+        }
+      });
     }
     function onKeyDown(e) {
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); save(); }
@@ -2338,9 +2404,13 @@ collect('identity', apply);
       var v = (s && s.value && typeof s.value === 'object') ? s.value : {};
       return (v.groups && typeof v.groups === 'object') ? { ...v.groups } : {};
     }
-    function writeGroups(next) {
+    // #30：与模块 2 的 writeGroups 对齐——失败必须可观测。原先这里没有 msg 形参，
+    // 三个调用点（勾选文件 / 新建组 / 删除组）写盘失败时只留一行 console.warn，
+    // 用户侧完全看不出「操作没生效」。现在与模块 2 同形：调用点给 msg 就把失败显示出来。
+    function writeGroups(next, msg) {
       return Promise.resolve(gpScope.set('groups', next)).catch(function (e) {
         console.warn('[dsh-global-prompt] groups write failed', e);
+        if (msg) setAddErr(t('saveError'));
       });
     }
     function addGroup() {
@@ -2351,12 +2421,12 @@ collect('identity', apply);
       gs[name] = { enabled: false, content: '', files: [], sessions: [] };
       setAddErr(null);
       setAddName('');
-      writeGroups(gs).then(function () { setOpenMap(function (m) { var n = { ...m }; n[name] = true; return n; }); });
+      writeGroups(gs, true).then(function () { setOpenMap(function (m) { var n = { ...m }; n[name] = true; return n; }); });
     }
     function removeGroup(key) {
       var gs = readGroups();
       delete gs[key];
-      writeGroups(gs);
+      writeGroups(gs, true);
     }
     function toggleOpen(key, next) { setOpenMap(function (m) { var n = { ...m }; n[key] = next; return n; }); }
 
@@ -2752,22 +2822,51 @@ collect('log-reposition', apply);
     let react_jsx_runtime = require('react/jsx-runtime');
     let primitives = require('@deepseek-ai/dsh-client-ui-primitives');
     var NS = 'peer-message-ui';
-    var zh = { copied: '已复制', copy: '复制会话 ID' };
-    var en = { copied: 'Copied', copy: 'Copy session ID' };
+    // #37：`navigator.clipboard` 在非安全上下文（http 承载）里整个不存在，`writeText` 也可能
+    // 取值即同步抛。此前直接 `navigator.clipboard.writeText(...).then(...)`：抛错发生在取属性/
+    // 调用的那一刻，挂在 promise 上的 `.catch` 根本接不到 ⇒ 复制按钮点了「没反应也没报错」。
+    // 本函数把「同步抛」与「异步拒绝」两条失败路径归一成一个 rejection，调用方一个 catch 全兜住。
+    //
+    // 为何不用平台自带的 `primitives.writeClipboard`（该函数确实带 `execCommand('copy')`
+    // 回落）：它的签名是 `Promise<boolean>`、**只在无法写入时 resolve(false)、从不 reject**。
+    // 本项要修的是「用户点了没反应也没报错」⇒ 必须让失败**可观测**；若改用它，「拒绝 ⇒ 提示」
+    // 这条判据会因为根本不产生 rejection 而变成恒不触发。
+    // 这是我在两条都可行的实现间的选择，未获确认；取舍理由如上。
+    // （此处刻意不写该平台函数所在的 文件:行号 —— 那个行号属于宿主平台的版本，本仓改不动它，
+    //   写死会在平台升级后变成陈旧引用。）
+    function copyText(value) {
+      try {
+        if (!navigator || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+          return Promise.reject(new Error('clipboard API unavailable (non-secure context?)'));
+        }
+        return Promise.resolve(navigator.clipboard.writeText(value));
+      } catch (e) {
+        return Promise.reject(e);
+      }
+    }
+    var zh = { copied: '已复制', copy: '复制会话 ID', copyFail: '复制失败' };
+    var en = { copied: 'Copied', copy: 'Copy session ID', copyFail: 'Copy failed' };
     // 复制反馈时长来自 session-toolkit-ui（见 factory 顶部 uiCfg），使用时读取
     function copyFeedbackMs() { return uiCfg.copyFeedbackMs; }
 
     /** Header action: copy this session's id to the clipboard, with a brief check mark feedback. */
     function CopySessionIdAction({ sessionId, ctx, t }) {
       const [copied, setCopied] = react.useState(false);
+      const [copyFailed, setCopyFailed] = react.useState(false);
       const timerRef = react.useRef(null);
       const onClick = () => {
-        navigator.clipboard.writeText(String(sessionId)).then(() => {
+        setCopyFailed(false);
+        copyText(String(sessionId)).then(() => {
           setCopied(true);
           if (timerRef.current !== null) timerRef.current();
           timerRef.current = ctx.timeout(() => setCopied(false), copyFeedbackMs());
         }).catch((error) => {
+          // 失败必须可见：仅打 console 时，非安全上下文下用户只看到「点了没反应」。
           console.error('[peer-message] copy session id failed:', error);
+          setCopied(false);
+          setCopyFailed(true);
+          if (timerRef.current !== null) timerRef.current();
+          timerRef.current = ctx.timeout(() => setCopyFailed(false), copyFeedbackMs());
         });
       };
       // 组件卸载时清理 timer disposer（ctx.timeout 属插件 fiber，组件卸载不自动清）
@@ -2777,8 +2876,8 @@ collect('log-reposition', apply);
       return react_jsx_runtime.jsx('button', {
         type: 'button',
         onClick,
-        title: copied ? t('copied') : t('copy'),
-        'aria-label': copied ? t('copied') : t('copy'),
+        title: copyFailed ? t('copyFail') : (copied ? t('copied') : t('copy')),
+        'aria-label': copyFailed ? t('copyFail') : (copied ? t('copied') : t('copy')),
         style: {
           display: 'inline-flex',
           alignItems: 'center',
@@ -2789,12 +2888,14 @@ collect('log-reposition', apply);
           border: 'none',
           borderRadius: 6,
           background: 'transparent',
-          color: 'var(--dsw-alias-label-secondary)',
+          color: copyFailed ? 'var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary))' : 'var(--dsw-alias-label-secondary)',
           cursor: 'pointer'
         },
-        children: copied
-          ? react_jsx_runtime.jsx(primitives.IconCheckOutlineRegular, { size: 16 })
-          : react_jsx_runtime.jsx(primitives.IconCopyOutlineRegular, { size: 16 })
+        children: copyFailed
+          ? react_jsx_runtime.jsx(primitives.IconCopyOutlineRegular, { size: 16 })
+          : (copied
+            ? react_jsx_runtime.jsx(primitives.IconCheckOutlineRegular, { size: 16 })
+            : react_jsx_runtime.jsx(primitives.IconCopyOutlineRegular, { size: 16 }))
       });
     }
 
@@ -2847,10 +2948,8 @@ collect('log-reposition', apply);
           if (typeof setMenuOpen === 'function') setMenuOpen(false);
           else if (typeof console !== 'undefined' && console.error) console.error('[peer-message] sidebar copy: useMenuOpenState hook unavailable — menu cannot be dismissed');
           var fail = function (error) { if (typeof console !== 'undefined' && console.error) console.error('[peer-message] sidebar copy session id failed:', error); };
-          try {
-            var copied = navigator.clipboard.writeText(String(props.sessionId));
-            if (copied && typeof copied.then === 'function') copied.then(null, fail);
-          } catch (error) { fail(error); }
+          // 与 header 按钮共用同一个 copyText（#37）：同一处判空/同步抛归一逻辑不写两份
+          copyText(String(props.sessionId)).then(null, fail);
         };
         return react_jsx_runtime.jsx(primitives.MenuItemButton, {
           // 官方三行（Fork/Rename/Pin）都不传 size —— MenuItemButton 把 icon 放进自己的

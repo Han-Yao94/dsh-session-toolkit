@@ -226,7 +226,7 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 
 迭代源码时可安装 checkout(`dsh plugin --profile web add <源码路径>`,使用 pnpm `link:` 依赖),或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
 
-维护者的验证门——对全部随包 JS 跑语法检查,另加打包契约(入口可达、import 声明完整、双语 README 版本一致)——针对源码 checkout 运行。它**不在本仓库里,也不随发布包分发**:本仓库只跟踪 `lib/`、`client/`、`cordis.patch.yml`、两份 README 与 `package.json`。该门断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。
+维护者的验证门——对全部随包 JS 跑语法检查,另加打包契约(入口可达、import 声明完整、双语 README 版本一致)——针对源码 checkout 运行。它**不在本仓库里,也不随发布包分发**:本仓库只跟踪 `lib/`、`client/`、`cordis.patch.yml`、两份 README 与 `package.json`。该门断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。两条汇总命令(`pnpm check`、`pnpm verify`)只覆盖语法检查与这份打包契约——**都不跑任何判据门**;判据门一律逐门单跑,各自带自己的退出码约定。
 
 ### 分享与安装
 

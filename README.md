@@ -199,7 +199,7 @@ Uninstall: `dsh plugin --profile web remove dsh-session-toolkit`.
 
 To iterate on the source without publishing, install the checkout directly (`dsh plugin --profile web add <path-to-checkout>`, which uses a pnpm `link:` dependency), or use a manual junction into the profile's `node_modules` plus an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer `dsh plugin add`.
 
-The maintainers' verification gate — syntax over every shipped JS file, plus a packaging contract (entry reachability, undeclared imports, EN/ZH README version parity) — runs against the source checkout. It is **not part of this repository and not part of the published package**: only `lib/`, `client/`, `cordis.patch.yml`, the READMEs and `package.json` are tracked here. The gate asserts that the working-tree content equals the tarball content, so it fails on purpose if a `prepare`/`prepack`/`prepublishOnly` script is ever added.
+The maintainers' verification gate — syntax over every shipped JS file, plus a packaging contract (entry reachability, undeclared imports, EN/ZH README version parity) — runs against the source checkout. It is **not part of this repository and not part of the published package**: only `lib/`, `client/`, `cordis.patch.yml`, the READMEs and `package.json` are tracked here. The gate asserts that the working-tree content equals the tarball content, so it fails on purpose if a `prepare`/`prepack`/`prepublishOnly` script is ever added. The two aggregate commands (`pnpm check`, `pnpm verify`) cover only syntax and this packaging contract — **neither runs any assertion gate**: each assertion gate is invoked on its own and carries its own exit-code contract.
 
 ### Share & Install
 
