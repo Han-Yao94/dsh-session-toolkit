@@ -285,7 +285,7 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 - 平移的 Session log 入口依赖官方 `sessionLogDownload` controller 接口,且复刻官方 0.1.6 的「⋯ 更多操作」菜单形态;**它是冻结的复刻件**:DSH 升级后由维护者对着 harness checkout 重跑一次漂移审计——按同一组锚点双向核对,有漂移就报出来,而不是静默通过。**有意的分叉**:官方 header 菜单此后多了第二项(`feedback`),本复刻件只保留 download;这是**已裁定的状态、不是待决问题**——门把它记成 note 而非失败,正因为"跟随上游新增能力"本身是一个决定,而该决定已于 2026-09-22 作出:**不跟随**。只有确实想要那个 feedback 入口时才需要重开。
 - `toPlainText` 宽松斜体匹配可能误删非格式位置的成对 `*`(如 `a * b * c`);对 agent 生成消息可接受,边界收紧为可选优化。
 - 聚合 `inject` 并集会等待所列全部服务;某 profile 缺一服务会拖慢整包 apply(web profile 当前齐备)。
-- harness 提供的依赖区间是前置版本并集;改完区间必须重跑 `pnpm install`,并在装好的 profile 上做一次依赖解析偏斜测量(期望 `SKEW_COUNT=0`;`DE-INSTANCE` 表示同版本不同实例,判定为可接受)。
+- harness 提供的依赖区间是前置版本并集;改完区间必须重跑 `pnpm install`,并在装好的 profile 上做一次依赖解析偏斜测量(期望 `SKEW_COUNT=0`;`DE-INSTANCE` 表示同版本不同实例,判定为可接受)。量测**必须显式给出宿主侧**才有意义:profile 根是「已装依赖树的根」,不是「运行中的宿主实例」——这种跑法属**插件自洽量测**,会打上 `HOST_BASELINE=PROFILE-SELF`,并自报「不构成对运行中宿主实例的结论」。
 - `ctx.get('agentDefaultModel')`、`sessionTitle`、`workspaceRegistry` 改为调用时惰性解析,缺失时降级为 cwd/路径寻址;`tools` 与 `webServer` 改用 `ctx.inject` 等待就绪——loader 并发创建条目,apply 时刻的 `ctx.get` 没有顺序保证,晚到会让功能永久静默消失。
 - **引用文件在组装路径预热** —— `readPromptFiles` 每次组装对每个引用文件做一次 `statSync`,仅在 mtime/大小变化时读盘;单文件与合计字节预算避免超大文件阻塞组装或撑爆提示词,状态投影也只在变化时写入。client 端 `files` 即时保存(`onWsFilesChange` / `save`)。
 - **UI 旋钮来自同一条目的 `client.*`** —— 浏览器半经 `configForms.get('session-toolkit')` 读 `client.*` 字段(表单不可用时回落冻结的 `UI_FALLBACK`)。client 条目本身仍拿不到 cordis 行配置,但设置的读取已不再需要 host 镜像:同一条目 Config 两侧都可见。
