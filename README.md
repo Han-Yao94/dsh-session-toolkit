@@ -8,32 +8,89 @@ Current version: **1.0.0**, verified against **DeepSeek Harness `dsh-v0.2.0-rc.1
 
 ---
 
+## Install
+
+Into any profile — a bundle layer, single source, no copies:
+
+```powershell
+# from npm
+dsh plugin --profile web add dsh-session-toolkit
+
+# from GitHub
+dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit
+
+# from a local checkout / tarball
+dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
+```
+
+The package's `dsh.bundle.patch` (`cordis.patch.yml`) registers the single entry (`id: session-toolkit`, `name: 'dsh-session-toolkit'`) as a **bundle layer** — applied after `dsh-base` / `dsh-web-app` and before the profile patch layer (layer order: bundles in sequence → profile patch → home patch → `--patch` overlay).
+
+Uninstall: `dsh plugin --profile web remove dsh-session-toolkit`.
+
+### What you are installing
+
+Published on **npm** as `dsh-session-toolkit` (**latest published version: v1.0.0**, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
+
+> **npm carries the current version.** `1.0.0` is published, so `dsh plugin --profile web add dsh-session-toolkit` gives you the session-management tools (`create_session` / `rename_session`) and everything else described above. `0.1.9` and `0.1.10` were tagged but never reached npm; `0.1.11` was the first published version since `0.1.8`. Installing from this checkout or from GitHub (`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`) is equivalent.
+
+- **npm**: consumers run `dsh plugin --profile web add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
+- **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.
+- **Tarball**: `pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`.
+
+Runtime dependencies (`@deepseek-ai/schemastery` — floor `^3.18.4` —, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-home-paths`) are declared in `dependencies` and install automatically; platform modules (`react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-locale`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-primitives`) are `peerDependencies` provided by the DSH host. Harness-provided ranges name **one prerelease generation each** — `^0.2.0-rc.1` — because a caret range never crosses a minor line, and semver additionally requires a comparator carrying a prerelease **of the candidate's own `major.minor.patch`**; that is why `^0.1.2-alpha.5 || ^0.1.6-alpha.2` used to be written as a union, and it is exactly how the resolution skew happened (the plugin kept its own older copy while the host ran a newer one). With `dsh-v0.2.0-rc.1` as the minimum supported version, the older union members are gone: **a harness upgrade now requires bumping these ranges**, and a dependency skew measurement against a live profile (expect `SKEW_COUNT=0`) is the check that tells you when. Ranges take effect at install time only — reinstall and restart the GUI before re-measuring. `@deepseek-ai/dsh-client-ui-slots` is intentionally absent: the `slots` service is seeded by the web shell, so a npm peer declaration was dead weight. Verified: a clean install of the packed tarball resolves all imports without any local junction. Two install-side checks back this up (they need an external checkout/profile, so they are not CI jobs): a dependency skew measurement against a live profile, and a drift audit of the frozen session-log replica against the harness checkout. Both live in the maintainers' working copy.
+
+### Local development
+
+To iterate on the source without publishing, install the checkout directly (`dsh plugin --profile web add <path-to-checkout>`, which uses a pnpm `link:` dependency), or use a manual junction into the profile's `node_modules` plus an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer `dsh plugin add`.
+
+The maintainers' verification gate — syntax over every shipped JS file, plus a packaging contract (entry reachability, undeclared imports, EN/ZH README version parity) — runs against the source checkout. It is **not part of this repository and not part of the published package**: only `lib/`, `client/`, `cordis.patch.yml`, the READMEs and `package.json` are tracked here. The gate asserts that the working-tree content equals the tarball content, so it fails on purpose if a `prepare`/`prepack`/`prepublishOnly` script is ever added. The two aggregate commands (`pnpm check`, `pnpm verify`) cover only syntax and this packaging contract — **neither runs any assertion gate**: each assertion gate is invoked on its own and carries its own exit-code contract.
+
+---
+
 ## Features
 
-### Session Identity
+Two families: **prompt layers** (what the model sees) and **session plumbing** (the tools and UI buttons that drive sessions).
+
+### Prompt layers
+
+#### Session Identity
 Per-session persona prompt injected into that session's system prompt (independent section `session-identity`, order 40, resolved per agent at every assembly), with a default identity plus per-session overrides. UI provides an identity dialog (enable switch, 4000-char soft limit, save/reset, edit default, inherit default) and status buttons in both `conversation.session.header.actions` (id `session-identity`, order 40) and `conversation.input.left` (id `session-identity-input`, order 40). The dialog card can be dragged by its title row: the offset is clamped to the viewport on every move and re-clamped on window resize, and when the card is larger than the viewport **each axis stays movable**, so every edge remains reachable. The position is not persisted — it resets when the dialog is closed.
 
-### Global Prompt
-A settings page (`settings.section`, id `global-prompt`, order 30) rendered as **Tabs (Global / Per workspace / Groups)**. The *Global* tab injects one prompt into every conversation's system prompt (section `global-prompt`, order 50); the *Per workspace* tab injects per-workspace prompts (section `workspace-prompt`, order 60); the *Groups* tab injects per-group prompts (section `group-prompt`, order 55 — see [Group Prompt](#group-prompt)). All five prompt sections — `session-identity` (order 40), `peer-inbox-discipline` (order 45, see [Peer Messaging](#peer-messaging)), `global-prompt` (order 50), `group-prompt` (order 55) and `workspace-prompt` (order 60) — are registered with **`interpolate: false`**, so `{{...}}` inside prompt text and referenced files stays literal — user content is never rewritten, and an unregistered `{{name}}` can never fail assembly. On kernels older than 0.1.6 (no per-section `interpolate` flag) `lib/prompt-literal.js` falls back to escaping `{` runs in the assembled text.
+#### Global Prompt
+A settings page (`settings.section`, id `global-prompt`, order 30) rendered as **Tabs (Global / Per workspace / Groups)**. The *Global* tab injects one prompt into every conversation's system prompt; the *Per workspace* tab injects per-workspace prompts; the *Groups* tab injects per-group prompts (see [Group Prompt](#group-prompt)). Those three, plus the session identity and the peer-inbox discipline section, make up the five prompt sections this plugin contributes — the map below lists them all with their orders.
 
 The plugin also exposes a read-only state route `GET /api/session-toolkit/state` (live workspaces + referenced-file read status + the live session list the group picker needs; any other method answers 405), which is how the settings page reads those runtime projections — they no longer occupy a settings namespace and are never persisted.
 
-### Workspace Prompt
+#### Workspace Prompt
 Per-workspace prompt injected for sessions whose `cwd` prefix-matches a configured workspace directory (that directory plus its subdirectories). The workspace list is derived from **active sessions' `cwd`** (`ctx.agents.roots()`), deduplicated and counted. When several enabled workspaces prefix-match a session's `cwd`, the **most-specific (longest matching path)** one wins. `removed` records paths the user removed so the active-workspace sync never re-adds them. The workspace row's enable switch is **live-save** (persisted immediately); the Save button only persists the prompt **content + referenced files**.
 
-### Group Prompt
+#### Group Prompt
 A tab of its own on the same settings page: **Groups** inject a prompt into **arbitrary sessions across workspaces**. Each group is a named entry holding an enable switch, a prompt body, a referenced-file list and an explicit **member list of session ids**; a session is matched by **its own session id**, not by its directory — which is exactly what lets one group span several workspaces. Membership is an **additional** injection layer: it never replaces the global or the per-workspace prompt. Every enabled group whose `sessions` contains the current session id injects into the section `group-prompt` (order 55, between global 50 and workspace 60), and several matched groups stack in **group-key order** with one blank line between their blocks. The picker lists **live sessions only** and **never auto-adds** one: a brand-new session joins no group until you tick it, and a session still listed in a group but currently offline is shown as *not online* (removable). When the assembly context carries no session id, the section injects nothing.
 
-### Referenced Files
+#### Referenced Files
 Global, workspace and group prompts can each reference a **list of files**. Every assembly re-reads each referenced file (UTF-8, content cached by `mtimeMs` + size, so an unchanged file is not re-read) and injects it after the prompt text. Byte budgets are enforced (`globalPrompt.maxFileBytes` / `maxTotalBytes`, defaults 256 KiB / 1 MiB): an oversized file is **skipped** rather than blocking assembly. A read failure is skipped too, and both cases are reported in the UI with the reason. Supports plain text and markdown. Per-file read status is a host **runtime projection** delivered to the UI by the read-only route `GET /api/session-toolkit/state` (`ok`: N chars / `fail`: reason / pending); the browser half polls it only while the settings page is open. The status **never touches a configuration file**, and its projection object is only replaced when the content actually changed.
 
-### Session Auto-Resume
+#### Prompt Dedup
+Performs **cross-section line-level deduplication** across the identity / global / group / workspace system-prompt sections (`session-identity`, `global-prompt`, `group-prompt`, `workspace-prompt`, orders 40/50/55/60). `promptDedup.enabled` is on by default (disable only by setting it to `false`). Splits each section on `\n` and keeps only the **first occurrence** of each identical original line (a single `seen` set spans all four sections, so intra-section self-duplicates also collapse); duplicate lines in later sections are dropped. **Blank lines (including whitespace-only lines) never take part in deduplication** — they are markdown's paragraph/list separators, and treating them as duplicates silently collapsed every section after the first one. Every section's unique content is preserved. It does not parse `{{name}}` placeholders (single-line complete groups, never split by line), does not break markdown, never sets `complete`, and never touches harness-owned sections (`harness:identity` / `deployment:persona` / tool sections). Mechanism: subscribe to the `system-prompt/assemble` waterfall on the plugin's root ctx, `await next()`, then deduplicate `sections` on the returned result before returning it.
+
+#### Prompt section map
+
+| Section id | Order | Injected for | Notes |
+|---|---|---|---|
+| `session-identity` | 40 | sessions that resolve an identity (their own record, else the default) | resolved per agent at every assembly; skipped for subagents (`origin` / `delegationDepth`) |
+| `peer-inbox-discipline` | 45 | every non-subagent session | fixed reminder of the inbound-peer-message rule (see [Peer Messaging](#peer-messaging)); no settings of its own |
+| `global-prompt` | 50 | every conversation | |
+| `group-prompt` | 55 | sessions whose **own id** is listed in an enabled group | several matched groups concatenate in group-key order, one blank line between blocks; no match injects nothing |
+| `workspace-prompt` | 60 | sessions whose `cwd` prefix-matches an enabled workspace | the most-specific (longest matching path) match wins; otherwise nothing |
+
+All five prompt sections are registered with **`interpolate: false`**, so `{{...}}` inside prompt text and referenced files stays literal — user content is never rewritten, and an unregistered `{{name}}` can never fail assembly. On kernels older than 0.1.6 (no per-section `interpolate` flag) `lib/prompt-literal.js` falls back to escaping `{` runs in the assembled text.
+
+### Session plumbing
+
+#### Session Auto-Resume
 Sessions with the per-session switch on are resumed automatically after a GUI restart, through the **official resume path** (`ctx.sessionController.resolveAgent`) when it exists — that is what restores the session's own model selection (via `installSelection`) in addition to the preset mount, and it validates subagent ownership and de-duplicates concurrent resumes. Older kernels without `sessionController` fall back to `ctx.agents.resume` plus a preset mount, carrying the default model from `agentDefaultModel`. Switching a session on resumes it immediately (false→true edge). Filters: switch on, top-level only (no subagent origin, no `delegationDepth > 0`, no `parentSession`), non-blank (`eventCount !== 0`, snapshot shape). Concurrency-bounded (default 3, configurable via `autoResume.concurrency`) with per-item failure isolation and an in-flight set that prevents duplicate resume.
 
-### Session-Log Button Relocation
-Shadows the official entry in `conversation.session.header.utilities` (same id `session-log-download`, priority −1, cell-shadowing) and registers a copy in `conversation.session.header.actions` (id `session-log-download-moved`, order 41), reusing the official `sessionLogDownload` controller (`ctx.get('sessionLogDownload')`) so download behavior stays identical to stock. The copy mirrors the **0.1.6** official surface — a "⋯ More actions" menu whose single item triggers the shared download dialog (localized through this plugin's own locale namespace) — and is a frozen replica: a stock upgrade that changes that UI must be synced by hand, and the shadowing registration must be re-checked whenever the official entry gains new menu items.
-
-### Session Admin
+#### Session Admin
 The host plane registers two more tools on the **same plane as `send_to_session` / `list_sessions`**:
 
 - **`create_session`** — create a new top-level session (a chat window in the GUI's left navigation). **Both `cwd` and `prompt` are required**: `cwd` must be an absolute path (a session without `cwd` never enters the host list) and `prompt` is the new session's first message. A successful create produces a real user message (**it genuinely runs one model turn and consumes one call**); by kernel design any session with events is persisted, so **this tool deliberately offers no "register-only, never speaks" ephemeral session**. An optional `title` sets the title immediately and pins it. The result carries `sessionId`, `cwd`, `status`, `title` and `notes`.
@@ -46,51 +103,11 @@ Both return **structured results** and **never throw an uncaught exception from 
 - **Visibility is not verified inside the tool** — whether a session created with `prompt` actually appears in the left navigation depends on the kernel **genuinely starting a turn** (navigation filters on the "blank session" bit, which only flips on `turn/start`; `followup` merely enqueues and wakes the driver). The result therefore draws **no** "it is in the navigation" conclusion, and `notes` says so.
 - **Preset degradation** — when the `agentPresets` service exists but default-preset resolution fails, the tool **returns `PRESET_RESOLVE_FAILED` instead of handing back a crippled session with no preset mounted**; when the service is absent entirely that is a legitimate degradation, and the session is still created with an explanatory `notes` entry.
 
-### Peer Messaging
+#### Peer Messaging
 `send_to_session` / `list_sessions` tools on the host plane (session addressing by id or workspace path, wakeup delivery) plus a "copy session ID" button in both `conversation.session.header.actions` (id `copy-session-id`, order 30) and `conversation.input.left` (id `copy-session-id-input`, order 30). Outgoing message content is converted to plain text (`toPlainText`) before delivery so recipients see tidy text rather than raw markdown. **`wakeup` has two distinct delivery paths**: with `wakeup: true` (`steer`) a message delivered while the target is executing enters the **next step boundary of the running turn** — it neither starts a new turn nor interrupts the current step — and a message delivered while the target is idle starts a turn immediately; with `wakeup: false` (`inject`) the message is only deposited and nobody is woken. **Two windows still queue rather than splice**: the target is idle at delivery (no step boundary exists to splice into, so the message is taken at the next turn boundary) and the kernel's `wakingAfterAbort` re-classification, which silently degrades `steer` to `next-turn` while the previous activity is being cancelled. `steer` is therefore **not** a promise that a message never waits — whether a message was actually spliced is decided by three things together: `target` was `next-step`, a turn was running at delivery time, and **no new `turn/start`** appeared between delivery and consumption.
 
-### Prompt Dedup
-Performs **cross-section line-level deduplication** across the identity / global / group / workspace system-prompt sections (`session-identity`, `global-prompt`, `group-prompt`, `workspace-prompt`, orders 40/50/55/60). `promptDedup.enabled` is on by default (disable only by setting it to `false`). Splits each section on `\n` and keeps only the **first occurrence** of each identical original line (a single `seen` set spans all four sections, so intra-section self-duplicates also collapse); duplicate lines in later sections are dropped. **Blank lines (including whitespace-only lines) never take part in deduplication** — they are markdown's paragraph/list separators, and treating them as duplicates silently collapsed every section after the first one. Every section's unique content is preserved. It does not parse `{{name}}` placeholders (single-line complete groups, never split by line), does not break markdown, never sets `complete`, and never touches harness-owned sections (`harness:identity` / `deployment:persona` / tool sections). Mechanism: subscribe to the `system-prompt/assemble` waterfall on the plugin's root ctx, `await next()`, then deduplicate `sections` on the returned result before returning it.
-
----
-
-## Compatibility
-
-The plugin is verified against **DeepSeek Harness `dsh-v0.2.0-rc.1`** — its **minimum supported version** (**contract surfaces + the full gate suite, not a complete functional regression**; the declared dependency ranges, `^0.2.0-rc.1` for the harness packages and `^3.18.4` for schemastery, apply): 0.1.7 replaced the settings model (a plugin registering a namespace, read through `ctx.settingsScope.bind`) with entry `Config` `volatile` fields read through `ctx.configForms`, so the whole user-data surface moved (see [Settings fields](#settings-fields-volatile-parts-of-the-entry-config)). On 0.1.6 and earlier the client entry stays at `pending (waiting for service: configForms)` and `web boot` reports `Failed to load plugins` — a **loud failure** rather than a silent degradation; upgrade the harness or uninstall this plugin. The existing fallbacks for `interpolate: false` and `ctx.sessionController.resolveAgent` are unchanged.
-
-- **Framework**: `@deepseek-ai/cordis` 4.0.4 and `@deepseek-ai/schemastery` 3.18.4 (the versions `dsh-v0.2.0-rc.1` vendors). The `@deepseek-ai/schemastery` floor is `^3.18.4`: `volatile()` exists only from 3.18.3, and earlier builds make the `Config` constructor throw. The plugin loads through the cordis harness and registers as a bundle via `dsh.bundle.patch`.
-- **Host services** (verified against the native source): this entry `Config`'s `volatile()` fields read live through `.get()`, with `ctx.on('loader/volatile-update', …)` notifying after a commit (no remount); `ctx.get('settings').update('session-toolkit', patch)` as the host write path back into the entry config (used by the workspace auto-add); `ctx.systemPrompt.section({ name, order, text, interpolate: false })`; `ctx.agents.{ get, resume({ resumeSessionId, agentOptions, setup }), roots, requireInitiator }`; `ctx.sessionController.resolveAgent(sessionId)`; `session.header` fields (`cwd`, `origin`, `delegationDepth`, `parentSession`, `agentPreset`; there is no `seedLength`); `ctx.inject(names, cb)` for late-arriving optional services; `ctx.get('webServer').register({ kind: 'exact', path, handler })`; `@deepseek-ai/dsh-tools` `defineTool` + `tools.register()`; and `ctx.get('agentDefaultModel')`, `sessionPersistence`, `sessionTitle`, `workspaceRegistry`, `sessionLogDownload`, `timer`, `on`, `effect`.
-- **Client services** (verified): `window.__ModuleLoader__.load({ id, factory })`; `ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)` with **lower-priority shadows**; `ctx.get('configForms').get('session-toolkit')` → form `{ getSnapshot()/.value/.status, subscribe, set(field, value), unset(field), mutate(ops, expectedRevision) }`, whose host-validated writes land in the active profile's `cordis.patch.yml`; `ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`; and the `timer` client service (`ctx.timeout`). The bundle's runtime `require`s resolve against the platform seed words (`react`, `react/jsx-runtime`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-primitives`, …).
-
-### Configuration and the settings data plane
-The plugin's **host-side** `Config` validates the entire configuration tree with schemastery as soon as the plugin loads; resolution order is schema default → profile patch (user layer), both resolved on the host before the plugin sees them.
-
-From DSH 0.1.7 on, settings projects **only fields declared `volatile()`**, and a settings surface is identified by exactly two facts: the **id of the edited entry** (`session-toolkit`) and **that entry's `Config`**. Consequently:
-
-- User data (identity texts, global and per-workspace prompts, the auto-resume switches, the UI knobs) are `volatile` fields: the browser half reads and writes the same entry `Config` through `ctx.get('configForms').get('session-toolkit')`, and host-validated writes land in the **active profile's `cordis.patch.yml`** (there is no `settings.yaml` namespace and no `settingsScope` service any more).
-- The host half calls `.get()` wherever it needs a value: a committed `volatile` update **does not remount the plugin**, so the identity and global-prompt sections pick the new text up on the next assembly, and `auto-resume` resumes a newly enabled session immediately through `loader/volatile-update`.
-- Ordinary fields (orders, budgets, retry and concurrency knobs) stay non-`volatile`: they are still visible in the settings form, but editing them goes through the normal cordis configuration lifecycle.
-- The **read-only runtime projections** (live workspaces, referenced-file read status) are not configuration at all: they go straight to the browser through `GET /api/session-toolkit/state` and never land in a file or in a form.
-
----
-
-## Architecture
-
-- **Host half** — `lib/index.js` composes eight feature modules (`identity.js`, `global-prompt.js`, `auto-resume.js`, `peer-message.js`, `session-admin.js`, `log-reposition.js`, `prompt-dedup.js`, `prompt-literal.js`). `inject` is the deduplicated union of module dependencies; each module's `apply` runs inside a `safe()` guard so one failing module never takes the whole package down. Every contribution is lifecycle-bound (`ctx.effect` for prompt sections and HTTP routes, plugin-fiber registrations for tools; timers go through the `timer` service). `global-prompt.js` owns the `globalPrompt`, `workspacePrompt` and `groupPrompt` volatile fields, the three prompt sections (`global-prompt` order 50 / `workspace-prompt` order 60 / `group-prompt` order 55), the `readPromptFiles` helper (mtime/size-cached live read; the cache is **namespaced per section**, so one section's eviction never drops another section's entries), the live runtime projections (active workspaces plus the live session list behind `GET /api/session-toolkit/state`), and the config write that adds newly discovered workspace paths back into the entry (`ctx.get('settings').update('session-toolkit', …)`); `prompt-literal.js` is the pre-0.1.6 fallback for literal prompt rendering.
-- **Client half** — `client/client.js` is a single `window.__ModuleLoader__.load` bundle; the four UI modules live in IIFEs and are collected into one `apply` that registers all slots in order (guarded per module). All UI uses `React.createElement`; styles are injected as `data-plugin` style tags with theme CSS variables and dark-mode coverage; no global DOM manipulation. The global-prompt module renders the **Tabs (Global / Per workspace / Groups)** page plus a reusable `FileRefsPanel` (add/remove referenced files, per-file status from the polled `GET /api/session-toolkit/state` projection) and the group editor (add/rename/remove groups, enable switches, prompt body, referenced files, and a session picker that lists live sessions as `title ?? short id` and marks saved-but-offline members *not online*).
-
-### Registered slots
-
-| Slot | Id | Order / priority | Feature |
-|---|---|---|---|
-| `settings.section` | `global-prompt` | order 30 | Global + workspace + group prompt page (Tabs) |
-| `conversation.session.header.actions` | `copy-session-id` | order 30 | Copy session ID |
-| `conversation.session.header.actions` | `session-identity` | order 40 | Identity button |
-| `conversation.session.header.actions` | `session-log-download-moved` | order 41 | Session log download |
-| `conversation.input.left` | `copy-session-id-input` | order 30 | Copy session ID (tool row) |
-| `conversation.input.left` | `session-identity-input` | order 40 | Identity button (tool row) |
-| `conversation.session.header.utilities` | `session-log-download` | priority −1 (shadow) | Hide stock button |
-| `sidebar.workspaces.session.menu.item` | `dsh-session-toolkit.copy-session-id` | order 500 | Copy session ID (session row ⋯ menu) |
+#### Session-Log Button Relocation
+Shadows the official entry in `conversation.session.header.utilities` (same id `session-log-download`, priority −1, cell-shadowing) and registers a copy in `conversation.session.header.actions` (id `session-log-download-moved`, order 41), reusing the official `sessionLogDownload` controller (`ctx.get('sessionLogDownload')`) so download behavior stays identical to stock. The copy mirrors the **0.1.6** official surface — a "⋯ More actions" menu whose single item triggers the shared download dialog (localized through this plugin's own locale namespace) — and is a frozen replica: a stock upgrade that changes that UI must be synced by hand, and the shadowing registration must be re-checked whenever the official entry gains new menu items.
 
 ---
 
@@ -167,78 +184,13 @@ The plugin exposes a single `Config` (schemastery schema) with per-feature keys.
 | `globalPrompt.enabled` / `.content` / `.files` | off / empty | **User data** (volatile): global prompt switch, body, and referenced file list. |
 | `workspacePrompt.workspaces` / `.removed` | empty | **User data** (volatile): per-workspace prompts plus the removed-path list. The active-workspace sync adds newly discovered paths to `workspaces` (through `ctx.get('settings').update`); paths listed in `removed` are never re-added. |
 | `autoResume.sessions` | empty | **User data** (volatile): per-session "resume after restart". A false→true edge resumes that session immediately. |
+
 The `client.*` keys below are validated by the host; they are the very fields the browser half reads through `configForms.get('session-toolkit')` (when the form is unavailable the client falls back to `UI_FALLBACK` in `client/client.js`, whose values equal the historical defaults). You can edit them in the plugin's settings page.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `client.identityCharLimit` | 4000 | Identity editor character limit (UI soft limit; the global-prompt editor uses it too). |
 | `client.copyFeedbackMs` | 1600 | Copy-feedback checkmark duration. |
-
----
-
-## Deployment
-
-Install into any profile (bundle layer; single source, no copies):
-
-```powershell
-# from npm
-dsh plugin --profile web add dsh-session-toolkit
-
-# from GitHub
-dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit
-
-# from a local checkout / tarball
-dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
-```
-
-The package's `dsh.bundle.patch` (`cordis.patch.yml`) registers the single entry (`id: session-toolkit`, `name: 'dsh-session-toolkit'`) as a **bundle layer** — applied after `dsh-base` / `dsh-web-app` and before the profile patch layer (layer order: bundles in sequence → profile patch → home patch → `--patch` overlay).
-
-Uninstall: `dsh plugin --profile web remove dsh-session-toolkit`.
-
-### Local development
-
-To iterate on the source without publishing, install the checkout directly (`dsh plugin --profile web add <path-to-checkout>`, which uses a pnpm `link:` dependency), or use a manual junction into the profile's `node_modules` plus an explicit `- insert:` entry in the profile's `cordis.patch.yml`. Prefer `dsh plugin add`.
-
-The maintainers' verification gate — syntax over every shipped JS file, plus a packaging contract (entry reachability, undeclared imports, EN/ZH README version parity) — runs against the source checkout. It is **not part of this repository and not part of the published package**: only `lib/`, `client/`, `cordis.patch.yml`, the READMEs and `package.json` are tracked here. The gate asserts that the working-tree content equals the tarball content, so it fails on purpose if a `prepare`/`prepack`/`prepublishOnly` script is ever added. The two aggregate commands (`pnpm check`, `pnpm verify`) cover only syntax and this packaging contract — **neither runs any assertion gate**: each assertion gate is invoked on its own and carries its own exit-code contract.
-
-### Share & Install
-
-Published on **npm** as `dsh-session-toolkit` (**latest published version: v1.0.0**, MIT) and mirrored on **GitHub** at `github.com/Han-Yao94/dsh-session-toolkit`. Pure-JS package — **no build step, no prepare script**. `files` whitelists `lib/`, `client/`, `cordis.patch.yml` and the READMEs.
-
-> **npm carries the current version.** `1.0.0` is published, so `dsh plugin --profile web add dsh-session-toolkit` gives you the session-management tools (`create_session` / `rename_session`) and everything else described above. `0.1.9` and `0.1.10` were tagged but never reached npm; `0.1.11` was the first published version since `0.1.8`. Installing from this checkout or from GitHub (`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`) is equivalent.
-
-- **npm**: consumers run `dsh plugin --profile web add dsh-session-toolkit`; new versions are released with `npm publish` (or `pnpm publish`).
-- **GitHub**: `dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`.
-- **Tarball**: `pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`.
-
-Runtime dependencies (`@deepseek-ai/schemastery` — floor `^3.18.4` —, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-home-paths`) are declared in `dependencies` and install automatically; platform modules (`react`, `@deepseek-ai/cordis`, `@deepseek-ai/dsh-client-locale`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-primitives`) are `peerDependencies` provided by the DSH host. Harness-provided ranges name **one prerelease generation each** — `^0.2.0-rc.1` — because a caret range never crosses a minor line, and semver additionally requires a comparator carrying a prerelease **of the candidate's own `major.minor.patch`**; that is why `^0.1.2-alpha.5 || ^0.1.6-alpha.2` used to be written as a union, and it is exactly how the resolution skew happened (the plugin kept its own older copy while the host ran a newer one). With `dsh-v0.2.0-rc.1` as the minimum supported version, the older union members are gone: **a harness upgrade now requires bumping these ranges**, and a dependency skew measurement against a live profile (expect `SKEW_COUNT=0`) is the check that tells you when. Ranges take effect at install time only — reinstall and restart the GUI before re-measuring. `@deepseek-ai/dsh-client-ui-slots` is intentionally absent: the `slots` service is seeded by the web shell, so a npm peer declaration was dead weight. Verified: a clean install of the packed tarball resolves all imports without any local junction. Two install-side checks back this up (they need an external checkout/profile, so they are not CI jobs): a dependency skew measurement against a live profile, and a drift audit of the frozen session-log replica against the harness checkout. Both live in the maintainers' working copy.
-
----
-
-## Model Experience
-
-### System prompt contributions
-
-#### What the model sees
-
-Five sections are contributed per assembly, in order: `session-identity` (order 40) → `peer-inbox-discipline` (order 45) → `global-prompt` (order 50) → `group-prompt` (order 55) → `workspace-prompt` (order 60), placed after the deployment persona and before tool guidance (100–199). The identity section is resolved per agent (`AssembleContext.agent`) at assembly time from `session-identity` settings and is skipped for subagents (`origin`/`delegationDepth`). The peer-inbox discipline section emits a fixed reminder of the inbound-peer-message rule; it is likewise skipped for subagents and has no settings of its own. The workspace section injects the most-specific (longest matching path) enabled workspace prompt for a session whose `cwd` prefix-matches a configured workspace; otherwise nothing. The group section injects every enabled group whose `sessions` list contains the session's **own id** — groups match by session id, not directory, so one group may span workspaces; multiple matching groups concatenate in group-key order with a blank line between blocks, and no match injects nothing.
-
-Each of the global and workspace sections appends its **referenced files' content** after the prompt text: every assembly re-reads `files` with `fs.readFileSync` (UTF-8, live), sanitizes each file's content (spaces out `{` runs), and concatenates them. A file that cannot be read is **skipped** (its content is not injected) but its read status is recorded for the UI. Empty sections are dropped at render.
-
-#### Token effect
-
-All five sections repeat their text on every request — the four prompt sections when enabled, the peer-inbox discipline section for every non-subagent session. The global prompt applies to every conversation; the identity text applies only to sessions that resolve it (their own record or the default); the workspace text applies only to sessions whose `cwd` prefix-matches an enabled configured workspace (most-specific match wins); the group text applies only to sessions whose own id is listed in an enabled group (all matching groups concatenate in key order); the peer-inbox discipline text applies to every non-subagent session. Referenced files add their full content to the effective prompt and therefore consume additional tokens — a large referenced file meaningfully increases the per-request token cost. Identity text is clipped to 8000 chars as a token guard.
-
-#### KV Cache effect
-
-Each section's rendered text is a fixed part of the request prefix while its settings are unchanged. Editing a session identity or a global/workspace prompt (or editing / adding a referenced file) may invalidate provider cache reuse from the first changed token (same semantics as stock persona sections).
-
-### Tool surface
-
-`send_to_session`, `list_sessions`, `inbox_check`, `create_session` and `rename_session` are registered on the host plane and visible to every session (subagents inherit them through the standing preset composition). Their arguments and results are JSON-compatible. **All five are exposed to the model**, so `create_session`'s semantic consequence — creating one produces a real user message and consumes one model call — is model-visible. (`inbox_check` is read-only, has no side effects, and always targets the calling session itself.)
-
----
-
 
 ### Migrating from the old `settings.yaml` (0.1.6 → 0.1.7)
 
@@ -265,7 +217,71 @@ Two ways to land it, pick one:
    plugin.Config(migratedConfig)              // throws when the shape is wrong
    ```
 
+## Architecture
+
+- **Host half** — `lib/index.js` composes eight feature modules (`identity.js`, `global-prompt.js`, `auto-resume.js`, `peer-message.js`, `session-admin.js`, `log-reposition.js`, `prompt-dedup.js`, `prompt-literal.js`). `inject` is the deduplicated union of module dependencies; each module's `apply` runs inside a `safe()` guard so one failing module never takes the whole package down. Every contribution is lifecycle-bound (`ctx.effect` for prompt sections and HTTP routes, plugin-fiber registrations for tools; timers go through the `timer` service). `global-prompt.js` owns the `globalPrompt`, `workspacePrompt` and `groupPrompt` volatile fields, the three prompt sections (`global-prompt` order 50 / `workspace-prompt` order 60 / `group-prompt` order 55), the `readPromptFiles` helper (mtime/size-cached live read; the cache is **namespaced per section**, so one section's eviction never drops another section's entries), the live runtime projections (active workspaces plus the live session list behind `GET /api/session-toolkit/state`), and the config write that adds newly discovered workspace paths back into the entry (`ctx.get('settings').update('session-toolkit', …)`); `prompt-literal.js` is the pre-0.1.6 fallback for literal prompt rendering.
+- **Client half** — `client/client.js` is a single `window.__ModuleLoader__.load` bundle; the four UI modules live in IIFEs and are collected into one `apply` that registers all slots in order (guarded per module). All UI uses `React.createElement`; styles are injected as `data-plugin` style tags with theme CSS variables and dark-mode coverage; no global DOM manipulation. The global-prompt module renders the **Tabs (Global / Per workspace / Groups)** page plus a reusable `FileRefsPanel` (add/remove referenced files, per-file status from the polled `GET /api/session-toolkit/state` projection) and the group editor (add/rename/remove groups, enable switches, prompt body, referenced files, and a session picker that lists live sessions as `title ?? short id` and marks saved-but-offline members *not online*).
+
+### Registered slots
+
+| Slot | Id | Order / priority | Feature |
+|---|---|---|---|
+| `settings.section` | `global-prompt` | order 30 | Global + workspace + group prompt page (Tabs) |
+| `conversation.session.header.actions` | `copy-session-id` | order 30 | Copy session ID |
+| `conversation.session.header.actions` | `session-identity` | order 40 | Identity button |
+| `conversation.session.header.actions` | `session-log-download-moved` | order 41 | Session log download |
+| `conversation.input.left` | `copy-session-id-input` | order 30 | Copy session ID (tool row) |
+| `conversation.input.left` | `session-identity-input` | order 40 | Identity button (tool row) |
+| `conversation.session.header.utilities` | `session-log-download` | priority −1 (shadow) | Hide stock button |
+| `sidebar.workspaces.session.menu.item` | `dsh-session-toolkit.copy-session-id` | order 500 | Copy session ID (session row ⋯ menu) |
+
 ---
+
+## Model Experience
+
+### System prompt contributions
+
+#### What the model sees
+
+Five sections are contributed per assembly, in order: `session-identity` (order 40) → `peer-inbox-discipline` (order 45) → `global-prompt` (order 50) → `group-prompt` (order 55) → `workspace-prompt` (order 60), placed after the deployment persona and before tool guidance (100–199). The identity section is resolved per agent (`AssembleContext.agent`) at assembly time from `session-identity` settings and is skipped for subagents (`origin`/`delegationDepth`). The peer-inbox discipline section emits a fixed reminder of the inbound-peer-message rule; it is likewise skipped for subagents and has no settings of its own. The workspace section injects the most-specific (longest matching path) enabled workspace prompt for a session whose `cwd` prefix-matches a configured workspace; otherwise nothing. The group section injects every enabled group whose `sessions` list contains the session's **own id** — groups match by session id, not directory, so one group may span workspaces; multiple matching groups concatenate in group-key order with a blank line between blocks, and no match injects nothing. (See the [prompt section map](#prompt-section-map) for the same five sections as a table.)
+
+Each of the global and workspace sections appends its **referenced files' content** after the prompt text: every assembly re-reads `files` with `fs.readFileSync` (UTF-8, live), appends each file's text **verbatim** (nothing rewrites it; the `{`-run escaping only happens on the pre-0.1.6 fallback path in `lib/prompt-literal.js`), and concatenates them. A file that cannot be read is **skipped** (its content is not injected) but its read status is recorded for the UI. Empty sections are dropped at render.
+
+#### Token effect
+
+All five sections repeat their text on every request — the four prompt sections when enabled, the peer-inbox discipline section for every non-subagent session. The global prompt applies to every conversation; the identity text applies only to sessions that resolve it (their own record or the default); the workspace text applies only to sessions whose `cwd` prefix-matches an enabled configured workspace (most-specific match wins); the group text applies only to sessions whose own id is listed in an enabled group (all matching groups concatenate in key order); the peer-inbox discipline text applies to every non-subagent session. Referenced files add their full content to the effective prompt and therefore consume additional tokens — a large referenced file meaningfully increases the per-request token cost. Identity text is clipped to 8000 chars as a token guard.
+
+#### KV Cache effect
+
+Each section's rendered text is a fixed part of the request prefix while its settings are unchanged. Editing a session identity or a global/workspace prompt (or editing / adding a referenced file) may invalidate provider cache reuse from the first changed token (same semantics as stock persona sections).
+
+### Tool surface
+
+`send_to_session`, `list_sessions`, `inbox_check`, `create_session` and `rename_session` are registered on the host plane and visible to every session (subagents inherit them through the standing preset composition). Their arguments and results are JSON-compatible. **All five are exposed to the model**, so `create_session`'s semantic consequence — creating one produces a real user message and consumes one model call — is model-visible. (`inbox_check` is read-only, has no side effects, and always targets the calling session itself.)
+
+---
+
+## Compatibility
+
+The plugin is verified against **DeepSeek Harness `dsh-v0.2.0-rc.1`** — its **minimum supported version** (**contract surfaces + the full gate suite, not a complete functional regression**; the declared dependency ranges, `^0.2.0-rc.1` for the harness packages and `^3.18.4` for schemastery, apply): 0.1.7 replaced the settings model (a plugin registering a namespace, read through `ctx.settingsScope.bind`) with entry `Config` `volatile` fields read through `ctx.configForms`, so the whole user-data surface moved (see [Settings fields](#settings-fields-volatile-parts-of-the-entry-config)). On 0.1.6 and earlier the client entry stays at `pending (waiting for service: configForms)` and `web boot` reports `Failed to load plugins` — a **loud failure** rather than a silent degradation; upgrade the harness or uninstall this plugin. The existing fallbacks for `interpolate: false` and `ctx.sessionController.resolveAgent` are unchanged.
+
+- **Framework**: `@deepseek-ai/cordis` 4.0.4 and `@deepseek-ai/schemastery` 3.18.4 (the versions `dsh-v0.2.0-rc.1` vendors). The `@deepseek-ai/schemastery` floor is `^3.18.4`: `volatile()` exists only from 3.18.3, and earlier builds make the `Config` constructor throw. The plugin loads through the cordis harness and registers as a bundle via `dsh.bundle.patch`.
+- **Host services** (verified against the native source): this entry `Config`'s `volatile()` fields read live through `.get()`, with `ctx.on('loader/volatile-update', …)` notifying after a commit (no remount); `ctx.get('settings').update('session-toolkit', patch)` as the host write path back into the entry config (used by the workspace auto-add); `ctx.systemPrompt.section({ name, order, text, interpolate: false })`; `ctx.agents.{ get, resume({ resumeSessionId, agentOptions, setup }), roots, requireInitiator }`; `ctx.sessionController.resolveAgent(sessionId)`; `session.header` fields (`cwd`, `origin`, `delegationDepth`, `parentSession`, `agentPreset`; there is no `seedLength`); `ctx.inject(names, cb)` for late-arriving optional services; `ctx.get('webServer').register({ kind: 'exact', path, handler })`; `@deepseek-ai/dsh-tools` `defineTool` + `tools.register()`; and `ctx.get('agentDefaultModel')`, `sessionPersistence`, `sessionTitle`, `workspaceRegistry`, `sessionLogDownload`, `timer`, `on`, `effect`.
+- **Client services** (verified): `window.__ModuleLoader__.load({ id, factory })`; `ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)` with **lower-priority shadows**; `ctx.get('configForms').get('session-toolkit')` → form `{ getSnapshot()/.value/.status, subscribe, set(field, value), unset(field), mutate(ops, expectedRevision) }`, whose host-validated writes land in the active profile's `cordis.patch.yml`; `ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`; and the `timer` client service (`ctx.timeout`). The bundle's runtime `require`s resolve against the platform seed words (`react`, `react/jsx-runtime`, `@deepseek-ai/dsh-client-store`, `@deepseek-ai/dsh-client-ui-primitives`, …).
+
+### Configuration and the settings data plane
+
+The plugin's **host-side** `Config` validates the entire configuration tree with schemastery as soon as the plugin loads; resolution order is schema default → profile patch (user layer), both resolved on the host before the plugin sees them.
+
+From DSH 0.1.7 on, settings projects **only fields declared `volatile()`**, and a settings surface is identified by exactly two facts: the **id of the edited entry** (`session-toolkit`) and **that entry's `Config`**. Consequently:
+
+- User data (identity texts, global and per-workspace prompts, the auto-resume switches, the UI knobs) are `volatile` fields: the browser half reads and writes the same entry `Config` through `ctx.get('configForms').get('session-toolkit')`, and host-validated writes land in the **active profile's `cordis.patch.yml`** (there is no `settings.yaml` namespace and no `settingsScope` service any more).
+- The host half calls `.get()` wherever it needs a value: a committed `volatile` update **does not remount the plugin**, so the identity and global-prompt sections pick the new text up on the next assembly, and `auto-resume` resumes a newly enabled session immediately through `loader/volatile-update`.
+- Ordinary fields (orders, budgets, retry and concurrency knobs) stay non-`volatile`: they are still visible in the settings form, but editing them goes through the normal cordis configuration lifecycle.
+- The **read-only runtime projections** (live workspaces, referenced-file read status) are not configuration at all: they go straight to the browser through `GET /api/session-toolkit/state` and never land in a file or in a form.
+
+---
+
 ## Mechanisms and Red Lines
 
 - **Identity injection** uses a single global section whose text provider resolves per agent — no per-agent registration, no lifecycle churn, real-time on settings change.

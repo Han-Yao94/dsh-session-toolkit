@@ -4,38 +4,93 @@
 
 DeepSeek Harness 的整合插件工具箱。将先前 5 个独立的本地插件——会话身份、全局提示词、会话自动恢复、Session log 按钮平移、会话间消息——合并为单个可安装包(官方 bundle 形态,`dsh.bundle.patch`),通过 `dsh plugin add` 安装;另含提示词去重(Prompt Dedup)功能。
 
-当前版本:**1.0.0**,已对照 **DeepSeek Harness `dsh-v0.2.0-rc.1`** 验证——它同时是**最低支持版本**(**契约面 + 全套门,非完整功能回归**):0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#compatibility))。
+当前版本:**1.0.0**,已对照 **DeepSeek Harness `dsh-v0.2.0-rc.1`** 验证——它同时是**最低支持版本**(**契约面 + 全套门,非完整功能回归**):0.1.6 及更早会**响亮失败**而非静默降级(见[兼容性](#兼容性))。
+
+---
+
+## 安装
+
+安装到任意 profile(bundle 层;单一来源,无副本):
+
+```powershell
+# 来自 npm
+dsh plugin --profile web add dsh-session-toolkit
+
+# 来自 GitHub
+dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit
+
+# 来自本地 checkout / tarball
+dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
+```
+
+包的 `dsh.bundle.patch`(`cordis.patch.yml`)将单一入口(`id: session-toolkit`,`name: 'dsh-session-toolkit'`)注册为 **bundle 层**——在 `dsh-base` / `dsh-web-app` 之后、profile patch 层之前应用(层序:bundles 依次 → profile patch → home patch → `--patch` 覆盖)。
+
+卸载:`dsh plugin --profile web remove dsh-session-toolkit`。
+
+### 你安装的是什么
+
+已发布至 **npm**(`dsh-session-toolkit`,**最新已发布版本 v1.0.0**,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
+
+> **npm 上就是当前版本。** `1.0.0` 已发布,因此 `dsh plugin --profile web add dsh-session-toolkit` 即可得到上文介绍的会话管理工具(`create_session` / `rename_session`)及其余全部功能。`0.1.9` 与 `0.1.10` 打过 tag 但从未进入 npm;`0.1.11` 是 `0.1.8` 之后第一个真正发布的版本。从本 checkout 或 GitHub 安装(`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`)等价。
+
+- **npm**:消费者 `dsh plugin --profile web add dsh-session-toolkit` 安装;新版本通过 `npm publish`(或 `pnpm publish`)发布。
+- **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
+- **tarball**:`pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`。
+
+运行时依赖(`@deepseek-ai/schemastery`(下限 `^3.18.4`——`volatile()` 自 3.18.3 起才有)、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`)声明在 `dependencies`,随安装自动拉取;平台模块(`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`)为 `peerDependencies`,由 DSH 宿主提供。harness 提供的包一律**只写一个前置版本代**——`^0.2.0-rc.1`:caret 区间不跨 minor,而 semver 还额外要求"比较器里必须有一个指明**候选人自身 `major.minor.patch`** 的前置版本",这正是当初要写成 `^0.1.2-alpha.5 || ^0.1.6-alpha.2` 并集的原因,也正是解析偏斜的根因(插件拿到自己的旧副本、宿主在跑新版本)。既然 `dsh-v0.2.0-rc.1` 已是最低支持版本,旧的并集成员已删除:**今后每次 harness 换代都必须同步抬高这些区间**,而针对已装 profile 做一次依赖解析偏斜测量(期望 `SKEW_COUNT=0`)就是告诉你该抬了的那个检查。区间只在安装期生效——重新安装并重启 GUI 之后再量。`@deepseek-ai/dsh-client-ui-slots` 刻意不声明:`slots` 服务由 web shell 播种,npm peer 声明是死重。已验证:打包 tgz 的干净安装可完整解析所有 import(不依赖本地 junction)。另有两条**安装侧**检查(需要外部 checkout/profile,因此不挂 CI):针对已装 profile 的依赖解析偏斜测量,与针对 harness checkout 的冻结复刻件漂移审计。两者都在维护者的工作副本里。
+
+### 本地开发
+
+迭代源码时可安装 checkout(`dsh plugin --profile web add <源码路径>`,使用 pnpm `link:` 依赖),或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
+
+维护者的验证门——对全部随包 JS 跑语法检查,另加打包契约(入口可达、import 声明完整、双语 README 版本一致)——针对源码 checkout 运行。它**不在本仓库里,也不随发布包分发**:本仓库只跟踪 `lib/`、`client/`、`cordis.patch.yml`、两份 README 与 `package.json`。该门断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。两条汇总命令(`pnpm check`、`pnpm verify`)只覆盖语法检查与这份打包契约——**都不跑任何判据门**;判据门一律逐门单跑,各自带自己的退出码约定。
 
 ---
 
 ## 功能
 
-### 会话身份(Session Identity)
+两族:**提示词层**(模型看到什么)与**会话管道**(驱动会话的工具与界面按钮)。
+
+### 提示词层
+
+#### 会话身份(Session Identity)
 每会话人设提示词注入该会话系统提示词(独立段 `session-identity`,order 40,每次组装按 agent 求值),支持默认身份与每会话覆盖。UI:身份浮层(启用开关、4000 字符软上限、保存/重置、编辑默认身份、继承默认身份)及双入口状态按钮:`conversation.session.header.actions`(id `session-identity`,order 40)与 `conversation.input.left`(id `session-identity-input`,order 40)。浮层卡片可按**标题行拖动**:位移每次移动都被钳制在视口内、窗口缩放时重新钳制;卡片比视口大时**每个轴都仍可移动**,四个边都能拖到。位置不持久化,浮层关闭即复位。
 
-### 全局提示词(Global Prompt)
-设置页(`settings.section`,id `global-prompt`,order 30),以 **Tabs(全局 / 按工作区 / 组)** 渲染。*全局* Tab 注入一段作用于所有会话系统提示词的文本(段 `global-prompt`,order 50);*按工作区* Tab 注入按工作区提示词(段 `workspace-prompt`,order 60);*组* Tab 注入按组提示词(段 `group-prompt`,order 55——见[组提示词](#组提示词group-prompt))。五个提示词段——`session-identity`(order 40)、`peer-inbox-discipline`(order 45,见[会话间消息](#会话间消息peer-messaging))、`global-prompt`(order 50)、`group-prompt`(order 55)与 `workspace-prompt`(order 60)——都以 **`interpolate: false`** 注册:提示词文本与引用文件里的 `{{...}}` 一律按字面保留,用户内容永不被改写,未注册的 `{{name}}` 也不可能让组装失败。0.1.6 之前的内核没有分段的 `interpolate` 开关,由 `lib/prompt-literal.js` 在组装结果上退化为 `{` 连续串空格化。
+#### 全局提示词(Global Prompt)
+设置页(`settings.section`,id `global-prompt`,order 30),以 **Tabs(全局 / 按工作区 / 组)** 渲染。*全局* Tab 注入一段作用于所有会话系统提示词的文本;*按工作区* Tab 注入按工作区提示词;*组* Tab 注入按组提示词(见[组提示词](#组提示词group-prompt))。这三者、会话身份与入站 peer 消息纪律段,合起来就是本插件贡献的五个提示词段——文末的[提示词段位图](#提示词段位图)把它们的顺序与作用对象列成一张表。
 
 同一个 webServer 上另注册只读状态路由 `GET /api/session-toolkit/state`(活跃工作区 + 引用文件读取状态 + 组选择器要用的在线会话清单;非 `GET` 一律 405),设置页据此读取这些运行时投影——它们不占 settings 命名空间、也从不落盘。
 
-### 工作区提示词(Workspace Prompt)
+#### 工作区提示词(Workspace Prompt)
 为 `cwd` 前缀匹配到已配置工作区目录(该目录及子目录)的会话注入按工作区提示词。工作区列表由**活跃会话的 `cwd`** 聚合而来(`ctx.agents.roots()`,去重并按会话数计数)。当多个已启用工作区前缀命中某会话的 `cwd` 时,取**最具体(路径最深/最长)**者。`removed` 记录用户已移除的路径,使活跃工作区同步不重新补回。工作区行的启用开关 **即时保存(live-save)**;「保存」按钮仅持久化提示词**内容 + 引用文件**。
 
-### 组提示词(Group Prompt)
+#### 组提示词(Group Prompt)
 设置页上的第三个 Tab:**组**。每个组是一条具名条目:启用开关、提示词正文、引用文件列表,以及**显式的成员会话 id 列表**;匹配依据是**该会话自己的 id**,不是它所在目录——这正是「一个组可以跨工作区」的原因。组是**额外的一层**:它不取代全局提示词,也不取代按工作区提示词。所有启用且 `sessions` 含当前会话 id 的组都注入到段 `group-prompt`(order 55,夹在全局 50 与工作区 60 之间),命中的多个组按**组键序**拼接,块与块之间留一个空行。选择器**只列在线(live)会话**,且**从不自动入组**:新会话在你勾选之前不属于任何组;已存在组里但当前离线的会话标为**未在线**(可移除)。组装上下文里取不到会话 id 时,该段注入空。
 
-### 引用文件(Referenced Files)
+#### 引用文件(Referenced Files)
 全局提示词、工作区提示词与组提示词均可引用**文件列表**。每次组装重新读取每个引用文件(UTF-8;按 `mtimeMs` + 大小缓存,未变化的文件不重复读盘),注入到提示词文本之后。有字节预算(`globalPrompt.maxFileBytes` / `maxTotalBytes`,默认 256 KiB / 1 MiB):超限文件**跳过**而不是阻塞组装。读取失败同样跳过,两种情况都在 UI 中显示具体原因。支持纯文本/markdown。每个文件的读取状态是 host 的**运行时投影**,经只读路由 `GET /api/session-toolkit/state` 送到 UI(`ok`:N 字符 / `fail`:原因 / 未读取),浏览器半只在设置页打开期间轮询它;**状态不写入任何配置文件**,内容未变时不重建投影。
 
-### 会话自动恢复(Session Auto-Resume)
+#### 提示词去重(Prompt Dedup)
+对 **身份 / 全局 / 组 / 工作区** 四段系统提示词(段 `session-identity`、`global-prompt`、`group-prompt`、`workspace-prompt`,order 40/50/55/60)做**跨段行级去重**。`promptDedup.enabled` 默认开启(仅显式设为 false 时禁用)。按 `\n` 切分,四段内出现过的**完全相同原行**只保留"先出现"那一份(全局 `seen` 贯穿四段,同段内部自重复也收敛),后出现段的重复行被去掉;任何段独有内容一律保留。**空行(含只有空白的行)不参与去重**——空行是 markdown 的段落/列表分隔,把它当成重复行会让第一段之后的每一段空行都被删掉。不解析 `{{name}}` 占位符(单行完整组,按行切分不会切断)、不破坏 markdown、不设 complete,绝不动 harness 自带段(`harness:identity` / `deployment:persona` / 工具段)。机制:在插件根 ctx 订阅 `system-prompt/assemble` waterfall,`await next()` 后对返回结果的 `sections` 做去重再返回。
+
+#### 提示词段位图
+
+| 段 id | 顺序 | 注入对象 | 说明 |
+|---|---|---|---|
+| `session-identity` | 40 | 能解析到身份的会话(自身记录,否则默认身份) | 每次组装按 agent(`AssembleContext.agent`)求值;subagent(`origin` / `delegationDepth`)跳过 |
+| `peer-inbox-discipline` | 45 | 每个非 subagent 会话 | 固定的入站 peer 消息纪律提醒(见[会话间消息](#会话间消息peer-messaging));自身没有设置项 |
+| `global-prompt` | 50 | 所有会话 | |
+| `group-prompt` | 55 | **自身 id** 列在某个已启用组里的会话 | 命中的多个组按组键序拼接,块间一个空行;无命中注入空 |
+| `workspace-prompt` | 60 | `cwd` 前缀匹配到已启用工作区的会话 | 最具体(匹配路径最长)者胜;否则为空 |
+
+五个提示词段都以 **`interpolate: false`** 注册:提示词文本与引用文件里的 `{{...}}` 一律按字面保留,用户内容永不被改写,未注册的 `{{name}}` 也不可能让组装失败。0.1.6 之前的内核没有分段的 `interpolate` 开关,由 `lib/prompt-literal.js` 在组装结果上退化为 `{` 连续串空格化。
+
+### 会话管道
+
+#### 会话自动恢复(Session Auto-Resume)
 开启开关的会话在 GUI 重启后自动恢复,优先走**官方恢复链路**(`ctx.sessionController.resolveAgent`)——它除了 mount preset,还会通过 `installSelection` 恢复会话自己的模型选择,并做 subagent 归属校验与并发恢复去重;0.1.6 之前没有该服务的内核回落为 `ctx.agents.resume` + 手工 mount preset,并携带 `agentDefaultModel` 的默认模型。开启某会话即立即恢复(false→true 边沿)。过滤:开关开启、仅顶层(无 subagent origin、无 `delegationDepth > 0`、无 `parentSession`)、非空白(快照形状的 `eventCount !== 0`)。并发受限(缺省 3,可由 `autoResume.concurrency` 配置),逐项失败隔离 + 在途集合防重复恢复。
 
-同一个 webServer 上另注册只读状态路由 `GET /api/session-toolkit/state`(活跃工作区 + 引用文件读取状态;非 `GET` 一律 405):设置页靠它拿这两项**运行时投影**,因此它们不再占用 settings 命名空间,也不落盘。
-
-### Session log 按钮平移(Session-Log Button Relocation)
-遮蔽 `conversation.session.header.utilities` 中的官方条目(同 id `session-log-download`,priority −1,cell shadowing),并在 `conversation.session.header.actions` 注册副本(id `session-log-download-moved`,order 41),复用官方 `sessionLogDownload` controller(`ctx.get('sessionLogDownload')`),下载行为与官方一致。副本对齐 **0.1.6** 的官方形态——「⋯ 更多操作」菜单(单条「下载 Session 日志」)触发共享对话框(文案走本插件自己的 locale 命名空间);它是**冻结的复刻件**:官方改版必须人工同步,官方条目新增菜单项时也要重新核对遮蔽策略。
-
-### 会话管理(Session Admin)
+#### 会话管理(Session Admin)
 host 平面另注册两个工具,**与 `send_to_session` / `list_sessions` 同平面**:
 
 - **`create_session`** —— 自主创建一个新的顶层会话(GUI 左侧导航里的一个聊天窗口)。**`cwd` 与 `prompt` 均必填**:`cwd` 必须是绝对路径(无 `cwd` 的会话不会进宿主列表),`prompt` 是新会话的首条消息。创建成功即产生一条真实用户消息(**会真实跑一轮模型、消耗一次调用**);按内核设计,产生过事件的会话会被持久化,因此**本工具不提供「只登记、不说话」的临时会话**。可选 `title` 会立即设定标题并 pin 住。返回体含 `sessionId`、`cwd`、`status`、`title` 与 `notes`。
@@ -48,51 +103,11 @@ host 平面另注册两个工具,**与 `send_to_session` / `list_sessions` 同�
 - **可见性未在工具内验证** —— 「带 `prompt` 建出的会话会出现在左侧导航」取决于内核是否**真正开跑一轮**(导航按「空白会话」判据过滤,该状态只在 `turn/start` 时翻转;`followup` 只是入队并唤醒驱动)。因此返回体**不下**「已出现在导航」的结论,`notes` 会写明这一点。
 - **preset 降级** —— `agentPresets` 服务存在但默认 preset 解析失败时,工具**返回 `PRESET_RESOLVE_FAILED`,而不是交付一个没有 preset 的残缺会话**;服务整体缺失属合法降级,会话照建并带说明性 `notes`。
 
-### 会话间消息(Peer Messaging)
+#### 会话间消息(Peer Messaging)
 host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区路径寻址会话、wakeup 投递),并在 `conversation.session.header.actions`(id `copy-session-id`,order 30)与 `conversation.input.left`(id `copy-session-id-input`,order 30)各加「复制会话 ID」按钮。发出消息内容在投递前经 `toPlainText` 转为纯文本,接收方看到整洁文本而非原始 markdown。**`wakeup` 有两条不同的投递路径**:`wakeup: true`(走 `steer`)时,目标**正在执行** ⇒ 消息进**当前轮的下一个步边界**(既不新开一轮,也不打断当前步);目标**空闲** ⇒ 立刻开一轮;`wakeup: false`(走 `inject`)只投递、不唤醒任何人。**两种情形仍会排队而不是插入**:投递时目标空闲(没有步边界可插,消息在下一个轮次边界被收下),以及内核的 `wakingAfterAbort` 重分类(上一个活动正在被取消时,`steer` 被静默降级为 `next-turn`)。因此 `steer` **不是**「消息永不等待」的承诺——判断一条消息是否真的插入,要看三件事同时成立:`target` 是 `next-step`、投递时有轮在跑、且投递到消费之间**没有新的 `turn/start`**。
 
-### 提示词去重(Prompt Dedup)
-对 **身份 / 全局 / 组 / 工作区** 四段系统提示词(段 `session-identity`、`global-prompt`、`group-prompt`、`workspace-prompt`,order 40/50/55/60)做**跨段行级去重**。`promptDedup.enabled` 默认开启(仅显式设为 false 时禁用)。按 `\n` 切分,四段内出现过的**完全相同原行**只保留"先出现"那一份(全局 `seen` 贯穿四段,同段内部自重复也收敛),后出现段的重复行被去掉;任何段独有内容一律保留。**空行(含只有空白的行)不参与去重**——空行是 markdown 的段落/列表分隔,把它当成重复行会让第一段之后的每一段空行都被删掉。不解析 `{{name}}` 占位符(单行完整组,按行切分不会切断)、不破坏 markdown、不设 complete,绝不动 harness 自带段(`harness:identity` / `deployment:persona` / 工具段)。机制:在插件根 ctx 订阅 `system-prompt/assemble` waterfall,`await next()` 后对返回结果的 `sections` 做去重再返回。
-
----
-
-## 兼容性
-
-插件已对照 **DeepSeek Harness `dsh-v0.2.0-rc.1`** 验证,并以它作为**最低支持版本**(**契约面 + 全套门,非完整功能回归**;声明的依赖区间——harness 包 `^0.2.0-rc.1`、schemastery `^3.18.4`):0.1.7 把 settings 从「插件注册命名空间 + `ctx.settingsScope.bind`」改为「条目 Config 的 `volatile` 字段 + `ctx.configForms`」,用户数据面因此整体迁移(见[设置字段](#设置字段条目-config-的-volatile-部分))。在 0.1.6 及更早内核上,客户端条目会停在 `pending (waiting for service: configForms)`,`web boot` 报「Failed to load plugins」——这是**响亮失败**而非静默降级,处置是升级 harness 或卸载本插件。`interpolate: false` 与 `ctx.sessionController.resolveAgent` 的既有兜底不变。
-
-- **框架**:`@deepseek-ai/cordis` 4.0.4 与 `@deepseek-ai/schemastery` 3.18.4(即 `dsh-v0.2.0-rc.1` vendored 的版本)。`@deepseek-ai/schemastery` 的下限是 `^3.18.4`:`volatile()` 自 3.18.3 才存在,更早的版本会让 `Config` 构造直接抛错。插件经 cordis harness 加载,并以 `dsh.bundle.patch` 注册为 bundle。
-- **Host 服务**(已对照原生源码校验):本条目 `Config` 的 `volatile()` 字段 + `.get()` 实时读取,提交后由 `ctx.on('loader/volatile-update', …)` 通知(不重挂插件);`ctx.get('settings').update('session-toolkit', patch)` 作为 host 写回条目 config 的入口(工作区自动补回用);`ctx.systemPrompt.section({ name, order, text, interpolate: false })`;`ctx.agents.{ get, resume({ resumeSessionId, agentOptions, setup }), roots, requireInitiator }`;`ctx.sessionController.resolveAgent(sessionId)`;`session.header` 字段(`cwd`、`origin`、`delegationDepth`、`parentSession`、`agentPreset`;没有 `seedLength`);用于等待晚到可选服务的 `ctx.inject(names, cb)`;`ctx.get('webServer').register({ kind: 'exact', path, handler })`;`@deepseek-ai/dsh-tools` 的 `defineTool` + `tools.register()`;以及 `ctx.get('agentDefaultModel')`、`sessionPersistence`、`sessionTitle`、`workspaceRegistry`、`sessionLogDownload`、`timer`、`on`、`effect`。
-- **Client 服务**(已校验):`window.__ModuleLoader__.load({ id, factory })`;`ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)`(**低 priority 遮蔽**);`ctx.get('configForms').get('session-toolkit')` → 表单 `{ getSnapshot()/.value/.status, subscribe, set(field, value), unset(field), mutate(ops, expectedRevision) }`(写入经 host 校验后落盘当前 profile 的 `cordis.patch.yml`);`ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`;只读状态路由 `GET /api/session-toolkit/state`;以及 `timer` client 服务(`ctx.timeout`)。bundle 的运行时 `require` 均解析自模块表种子词(`react`、`react/jsx-runtime`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`、……)。
-
-### 配置与设置数据面
-插件的 **host 侧** `Config` 在插件加载时即用 schemastery 校验整棵配置树。解析顺序 = schema 默认 → profile patch(用户层);两者都在 host 侧解析完再交给插件。
-
-DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个事实标识一份设置:**被编辑条目的 id**(= `session-toolkit`)与**该条目的 Config**。因此:
-
-- 用户数据(身份文本、全局/工作区提示词、自动上线开关、UI 旋钮)声明为 `volatile` 字段,浏览器半经 `ctx.get('configForms').get('session-toolkit')` 读写同一份条目 Config,写入由 host 校验后落盘**当前 profile 的 `cordis.patch.yml`**(不再有 `settings.yaml` 命名空间,也没有 `settingsScope` 服务)。
-- host 半每次用到时 `.get()` 实时读取:`volatile` 值提交后**不重挂插件**,`identity` / `global-prompt` 段在下一次组装就生效,`auto-resume` 经 `loader/volatile-update` 立刻恢复新开启的会话。
-- 普通字段(顺序、上限、重试、并发等部署参数)保持非 `volatile`:它们同样能在设置页里看到,但修改走 cordis 配置的正常生命周期。
-- 运行时的**只读投影**(活跃工作区、引用文件读取状态)不属于配置,经 `GET /api/session-toolkit/state` 直接送给浏览器,既不落盘也不出现在表单里。
-
----
-
-## 架构
-
-- **Host 半** —— `lib/index.js` 组装八个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` / `groupPrompt` 三组 volatile 字段的读取、三个提示词段(`global-prompt` order 50 / `workspace-prompt` order 60 / `group-prompt` order 55)、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读;缓存**按段命名空间隔离**,一段的剔除不会误删另一段的条目)、运行时投影聚合(活跃工作区 + 在线会话清单,经 `GET /api/session-toolkit/state` 送出),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
-- **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;四个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区 / 组)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件;每文件状态来自 `GET /api/session-toolkit/state` 的轮询投影)与组编辑器(组的新增/改名/删除、启用开关、正文、引用文件,以及会话选择器:在线会话按 `title ?? 短 id` 列出,已存但离线的成员标**未在线**)。
-
-### 注册的 Slots
-
-| Slot | Id | Order / priority | 功能 |
-|---|---|---|---|
-| `settings.section` | `global-prompt` | order 30 | 全局 + 工作区 + 组提示词页(Tabs) |
-| `conversation.session.header.actions` | `copy-session-id` | order 30 | 复制会话 ID |
-| `conversation.session.header.actions` | `session-identity` | order 40 | 身份按钮 |
-| `conversation.session.header.actions` | `session-log-download-moved` | order 41 | Session log 下载 |
-| `conversation.input.left` | `copy-session-id-input` | order 30 | 复制会话 ID(工具行) |
-| `conversation.input.left` | `session-identity-input` | order 40 | 身份按钮(工具行) |
-| `conversation.session.header.utilities` | `session-log-download` | priority −1(遮蔽) | 隐藏官方按钮 |
-| `sidebar.workspaces.session.menu.item` | `dsh-session-toolkit.copy-session-id` | order 500 | 复制会话 ID(会话行 ⋯ 菜单) |
+#### Session log 按钮平移(Session-Log Button Relocation)
+遮蔽 `conversation.session.header.utilities` 中的官方条目(同 id `session-log-download`,priority −1,cell shadowing),并在 `conversation.session.header.actions` 注册副本(id `session-log-download-moved`,order 41),复用官方 `sessionLogDownload` controller(`ctx.get('sessionLogDownload')`),下载行为与官方一致。副本对齐 **0.1.6** 的官方形态——「⋯ 更多操作」菜单(单条「下载 Session 日志」)触发共享对话框(文案走本插件自己的 locale 命名空间);它是**冻结的复刻件**:官方改版必须人工同步,官方条目新增菜单项时也要重新核对遮蔽策略。
 
 ---
 
@@ -169,6 +184,7 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 | `globalPrompt.enabled` / `.content` / `.files` | off / 空 | **用户数据**(volatile):全局提示词开关、正文、引用文件列表。 |
 | `workspacePrompt.workspaces` / `.removed` | 空 | **用户数据**(volatile):按工作区提示词与「已移除路径」。活跃工作区同步会把新出现的路径补进 `workspaces`(经 `ctx.get('settings').update`),`removed` 里的路径不会被补回。 |
 | `autoResume.sessions` | 空 | **用户数据**(volatile):每会话「重启后自动上线」。false→true 立即恢复该会话。 |
+
 下列 `client.*` 键由 host 校验;浏览器半经 `configForms.get('session-toolkit')` 读的就是这几个字段(表单不可用时回落 `client/client.js` 里的 `UI_FALLBACK`,值等于历史默认值)。设置页「插件」条目里可以直接改它们。
 
 | 键 | 默认值 | 含义 |
@@ -203,42 +219,23 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 
 ---
 
-## 部署
+## 架构
 
-安装到任意 profile(bundle 层;单一来源,无副本):
+- **Host 半** —— `lib/index.js` 组装八个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` / `groupPrompt` 三组 volatile 字段的读取、三个提示词段(`global-prompt` order 50 / `workspace-prompt` order 60 / `group-prompt` order 55)、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读;缓存**按段命名空间隔离**,一段的剔除不会误删另一段的条目)、运行时投影聚合(活跃工作区 + 在线会话清单,经 `GET /api/session-toolkit/state` 送出),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
+- **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;四个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区 / 组)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件;每文件状态来自 `GET /api/session-toolkit/state` 的轮询投影)与组编辑器(组的新增/改名/删除、启用开关、正文、引用文件,以及会话选择器:在线会话按 `title ?? 短 id` 列出,已存但离线的成员标**未在线**)。
 
-```powershell
-# 来自 npm
-dsh plugin --profile web add dsh-session-toolkit
+### 注册的 Slots
 
-# 来自 GitHub
-dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit
-
-# 来自本地 checkout / tarball
-dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
-```
-
-包的 `dsh.bundle.patch`(`cordis.patch.yml`)将单一入口(`id: session-toolkit`,`name: 'dsh-session-toolkit'`)注册为 **bundle 层**——在 `dsh-base` / `dsh-web-app` 之后、profile patch 层之前应用(层序:bundles 依次 → profile patch → home patch → `--patch` 覆盖)。
-
-卸载:`dsh plugin --profile web remove dsh-session-toolkit`。
-
-### 本地开发
-
-迭代源码时可安装 checkout(`dsh plugin --profile web add <源码路径>`,使用 pnpm `link:` 依赖),或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
-
-维护者的验证门——对全部随包 JS 跑语法检查,另加打包契约(入口可达、import 声明完整、双语 README 版本一致)——针对源码 checkout 运行。它**不在本仓库里,也不随发布包分发**:本仓库只跟踪 `lib/`、`client/`、`cordis.patch.yml`、两份 README 与 `package.json`。该门断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。两条汇总命令(`pnpm check`、`pnpm verify`)只覆盖语法检查与这份打包契约——**都不跑任何判据门**;判据门一律逐门单跑,各自带自己的退出码约定。
-
-### 分享与安装
-
-已发布至 **npm**(`dsh-session-toolkit`,**最新已发布版本 v1.0.0**,MIT)并同步至 **GitHub**(`github.com/Han-Yao94/dsh-session-toolkit`)。纯 JS 包——**无构建步骤、无 prepare 脚本**。`files` 已白名单 `lib/`、`client/`、`cordis.patch.yml` 与 README。
-
-> **npm 上就是当前版本。** `1.0.0` 已发布,因此 `dsh plugin --profile web add dsh-session-toolkit` 即可得到上文介绍的会话管理工具(`create_session` / `rename_session`)及其余全部功能。`0.1.9` 与 `0.1.10` 打过 tag 但从未进入 npm;`0.1.11` 是 `0.1.8` 之后第一个真正发布的版本。从本 checkout 或 GitHub 安装(`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`)等价。
-
-- **npm**:消费者 `dsh plugin --profile web add dsh-session-toolkit` 安装;新版本通过 `npm publish`(或 `pnpm publish`)发布。
-- **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
-- **tarball**:`pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`。
-
-运行时依赖(`@deepseek-ai/schemastery`(下限 `^3.18.4`——`volatile()` 自 3.18.3 起才有)、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`)声明在 `dependencies`,随安装自动拉取;平台模块(`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`)为 `peerDependencies`,由 DSH 宿主提供。harness 提供的包一律**只写一个前置版本代**——`^0.2.0-rc.1`:caret 区间不跨 minor,而 semver 还额外要求"比较器里必须有一个指明**候选人自身 `major.minor.patch`** 的前置版本",这正是当初要写成 `^0.1.2-alpha.5 || ^0.1.6-alpha.2` 并集的原因,也正是解析偏斜的根因(插件拿到自己的旧副本、宿主在跑新版本)。既然 `dsh-v0.2.0-rc.1` 已是最低支持版本,旧的并集成员已删除:**今后每次 harness 换代都必须同步抬高这些区间**,而针对已装 profile 做一次依赖解析偏斜测量(期望 `SKEW_COUNT=0`)就是告诉你该抬了的那个检查。区间只在安装期生效——重新安装并重启 GUI 之后再量。`@deepseek-ai/dsh-client-ui-slots` 刻意不声明:`slots` 服务由 web shell 播种,npm peer 声明是死重。已验证:打包 tgz 的干净安装可完整解析所有 import(不依赖本地 junction)。另有两条**安装侧**检查(需要外部 checkout/profile,因此不挂 CI):针对已装 profile 的依赖解析偏斜测量,与针对 harness checkout 的冻结复刻件漂移审计。两者都在维护者的工作副本里。
+| Slot | Id | Order / priority | 功能 |
+|---|---|---|---|
+| `settings.section` | `global-prompt` | order 30 | 全局 + 工作区 + 组提示词页(Tabs) |
+| `conversation.session.header.actions` | `copy-session-id` | order 30 | 复制会话 ID |
+| `conversation.session.header.actions` | `session-identity` | order 40 | 身份按钮 |
+| `conversation.session.header.actions` | `session-log-download-moved` | order 41 | Session log 下载 |
+| `conversation.input.left` | `copy-session-id-input` | order 30 | 复制会话 ID(工具行) |
+| `conversation.input.left` | `session-identity-input` | order 40 | 身份按钮(工具行) |
+| `conversation.session.header.utilities` | `session-log-download` | priority −1(遮蔽) | 隐藏官方按钮 |
+| `sidebar.workspaces.session.menu.item` | `dsh-session-toolkit.copy-session-id` | order 500 | 复制会话 ID(会话行 ⋯ 菜单) |
 
 ---
 
@@ -248,9 +245,9 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 
 #### 模型看到的内容
 
-每次组装贡献五个段,顺序:`session-identity`(order 40)→ `peer-inbox-discipline`(order 45)→ `global-prompt`(order 50)→ `group-prompt`(order 55)→ `workspace-prompt`(order 60),位于部署 persona 之后、工具引导(100–199)之前。身份段在组装时按 agent(`AssembleContext.agent`)从 `session-identity` 设置解析,subagent(`origin`/`delegationDepth`)跳过。入站 peer 消息纪律段输出一段固定的纪律提醒,同样对 subagent 跳过,且自身没有设置项。工作区段为 `cwd` 前缀匹配到配置工作区(取路径最深/最具体且启用者)的会话注入该工作区提示词,否则为空。组段在**自身会话 id** 命中某个已启用组的 `sessions` 列表时才注入(按会话 id 而非目录匹配,故一个组可跨工作区);多个命中组按组键序拼接、块间一个空行;无命中注入空。
+每次组装贡献五个段,顺序:`session-identity`(order 40)→ `peer-inbox-discipline`(order 45)→ `global-prompt`(order 50)→ `group-prompt`(order 55)→ `workspace-prompt`(order 60),位于部署 persona 之后、工具引导(100–199)之前。身份段在组装时按 agent(`AssembleContext.agent`)从 `session-identity` 设置解析,subagent(`origin`/`delegationDepth`)跳过。入站 peer 消息纪律段输出一段固定的纪律提醒,同样对 subagent 跳过,且自身没有设置项。工作区段为 `cwd` 前缀匹配到配置工作区(取路径最深/最具体且启用者)的会话注入该工作区提示词,否则为空。组段在**自身会话 id** 命中某个已启用组的 `sessions` 列表时才注入(按会话 id 而非目录匹配,故一个组可跨工作区);多个命中组按组键序拼接、块间一个空行;无命中注入空。(这五个段另有一张表,见文末的[提示词段位图](#提示词段位图)。)
 
-全局段与工作区段都会在提示词文本后追加其**引用文件内容**:每次组装读取 `files`(UTF-8,按 mtime/大小缓存),按原文拼接(段声明 `interpolate: false`,内容不被改写)。无法读取或超出字节预算的文件会**跳过**(其内容不注入),但其读取状态被记录供 UI 显示。空段在渲染时删除。
+全局段与工作区段都会在提示词文本后追加其**引用文件内容**:每次组装读取 `files`(UTF-8,按 mtime/大小缓存),按原文拼接(段声明 `interpolate: false`,内容不被改写;`{` 串的空格化只发生在 0.1.6 之前的旧内核兜底路径 `lib/prompt-literal.js` 里,当前路径不做任何改写)。无法读取或超出字节预算的文件会**跳过**(其内容不注入),但其读取状态被记录供 UI 显示。空段在渲染时删除。
 
 #### Token 影响
 
@@ -263,6 +260,26 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 ### 工具面
 
 `send_to_session`、`list_sessions`、`inbox_check`、`create_session` 与 `rename_session` 在 host 平面注册,所有会话可见(subagent 经常驻 preset 组装继承)。参数与返回均为 JSON 兼容。**五个工具都会向模型暴露**,因此 `create_session` 的语义后果(创建即产生一条真实用户消息并消耗一次模型调用)对模型是可见的。(`inbox_check` 只读、无副作用,目标恒为调用者自己的会话。)
+
+---
+
+## 兼容性
+
+插件已对照 **DeepSeek Harness `dsh-v0.2.0-rc.1`** 验证,并以它作为**最低支持版本**(**契约面 + 全套门,非完整功能回归**;声明的依赖区间——harness 包 `^0.2.0-rc.1`、schemastery `^3.18.4`):0.1.7 把 settings 从「插件注册命名空间 + `ctx.settingsScope.bind`」改为「条目 Config 的 `volatile` 字段 + `ctx.configForms`」,用户数据面因此整体迁移(见[设置字段](#设置字段条目-config-的-volatile-部分))。在 0.1.6 及更早内核上,客户端条目会停在 `pending (waiting for service: configForms)`,`web boot` 报「Failed to load plugins」——这是**响亮失败**而非静默降级,处置是升级 harness 或卸载本插件。`interpolate: false` 与 `ctx.sessionController.resolveAgent` 的既有兜底不变。
+
+- **框架**:`@deepseek-ai/cordis` 4.0.4 与 `@deepseek-ai/schemastery` 3.18.4(即 `dsh-v0.2.0-rc.1` vendored 的版本)。`@deepseek-ai/schemastery` 的下限是 `^3.18.4`:`volatile()` 自 3.18.3 才存在,更早的版本会让 `Config` 构造直接抛错。插件经 cordis harness 加载,并以 `dsh.bundle.patch` 注册为 bundle。
+- **Host 服务**(已对照原生源码校验):本条目 `Config` 的 `volatile()` 字段 + `.get()` 实时读取,提交后由 `ctx.on('loader/volatile-update', …)` 通知(不重挂插件);`ctx.get('settings').update('session-toolkit', patch)` 作为 host 写回条目 config 的入口(工作区自动补回用);`ctx.systemPrompt.section({ name, order, text, interpolate: false })`;`ctx.agents.{ get, resume({ resumeSessionId, agentOptions, setup }), roots, requireInitiator }`;`ctx.sessionController.resolveAgent(sessionId)`;`session.header` 字段(`cwd`、`origin`、`delegationDepth`、`parentSession`、`agentPreset`;没有 `seedLength`);用于等待晚到可选服务的 `ctx.inject(names, cb)`;`ctx.get('webServer').register({ kind: 'exact', path, handler })`;`@deepseek-ai/dsh-tools` 的 `defineTool` + `tools.register()`;以及 `ctx.get('agentDefaultModel')`、`sessionPersistence`、`sessionTitle`、`workspaceRegistry`、`sessionLogDownload`、`timer`、`on`、`effect`。
+- **Client 服务**(已校验):`window.__ModuleLoader__.load({ id, factory })`;`ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)`(**低 priority 遮蔽**);`ctx.get('configForms').get('session-toolkit')` → 表单 `{ getSnapshot()/.value/.status, subscribe, set(field, value), unset(field), mutate(ops, expectedRevision) }`(写入经 host 校验后落盘当前 profile 的 `cordis.patch.yml`);`ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`;只读状态路由 `GET /api/session-toolkit/state`;以及 `timer` client 服务(`ctx.timeout`)。bundle 的运行时 `require` 均解析自模块表种子词(`react`、`react/jsx-runtime`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`、……)。
+
+### 配置与设置数据面
+插件的 **host 侧** `Config` 在插件加载时即用 schemastery 校验整棵配置树。解析顺序 = schema 默认 → profile patch(用户层);两者都在 host 侧解析完再交给插件。
+
+DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个事实标识一份设置:**被编辑条目的 id**(= `session-toolkit`)与**该条目的 Config**。因此:
+
+- 用户数据(身份文本、全局/工作区提示词、自动上线开关、UI 旋钮)声明为 `volatile` 字段,浏览器半经 `ctx.get('configForms').get('session-toolkit')` 读写同一份条目 Config,写入由 host 校验后落盘**当前 profile 的 `cordis.patch.yml`**(不再有 `settings.yaml` 命名空间,也没有 `settingsScope` 服务)。
+- host 半每次用到时 `.get()` 实时读取:`volatile` 值提交后**不重挂插件**,`identity` / `global-prompt` 段在下一次组装就生效,`auto-resume` 经 `loader/volatile-update` 立刻恢复新开启的会话。
+- 普通字段(顺序、上限、重试、并发等部署参数)保持非 `volatile`:它们同样能在设置页里看到,但修改走 cordis 配置的正常生命周期。
+- 运行时的**只读投影**(活跃工作区、引用文件读取状态)不属于配置,经 `GET /api/session-toolkit/state` 直接送给浏览器,既不落盘也不出现在表单里。
 
 ---
 
