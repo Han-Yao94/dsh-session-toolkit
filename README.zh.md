@@ -109,6 +109,14 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 #### Session log 按钮平移(Session-Log Button Relocation)
 遮蔽 `conversation.session.header.utilities` 中的官方条目(同 id `session-log-download`,priority −1,cell shadowing),并在 `conversation.session.header.actions` 注册副本(id `session-log-download-moved`,order 41),复用官方 `sessionLogDownload` controller(`ctx.get('sessionLogDownload')`),下载行为与官方一致。副本对齐 **0.1.6** 的官方形态——「⋯ 更多操作」菜单(单条「下载 Session 日志」)触发共享对话框(文案走本插件自己的 locale 命名空间);它是**冻结的复刻件**:官方改版必须人工同步,官方条目新增菜单项时也要重新核对遮蔽策略。
 
+#### 跨会话检索(Cross-Session Search)
+
+`search_sessions` 是第六只模型工具:跨会话的**字面**内容检索(大小写不敏感、空白灵活),回答「这件事我们在哪聊过」,底座是宿主的 `sessionQuery` 服务。流程 = 列出会话 → 按 `cwd` / `since` 过滤 → 对每个会话提取出的语义文本做字面匹配 → 返回会话标题、事件坐标(`sessionId` + `seq` —— 宿主会话读取工具正是吃这两个值;本包自身不暴露读取工具)与文本片段。任何失败都以结构化 `{ ok: false, error, errorText }` 返回(后者是人读的错误说明),绝不向调用方会话抛异常。
+
+**事件面(surface)是这里最该知道的一点。** 默认返回 `current`(仍在会话有效模型上下文里的文本)**与** `shadowed`(被后续快照取代、或被上下文压缩挤出去的文本)两侧的命中 —— 你要「找回」的东西通常正躺在 `shadowed` 里;`log-only`(从未上过任何面的原始日志记录)默认排除,除非显式传 `surfaces`。扫描始终是字面的:它走宿主的 `filterEvents`,不经过 FTS 索引;因此是否启用索引对本工具没有影响。`sessionQuery` 服务缺失时本模块不注册任何东西,包内其余功能照常工作。
+
+扫描预算:默认最多 50 个会话 / 每个会话 5 条命中 / 总共 20 条命中(`maxSessions`、`perSession`、`limit` 可提高,硬顶 200 / 20 / 100);被截断时 `truncated.sessions` / `truncated.matches` 为 true;空结果是 `ok: true` 且命中 0 条,不是失败。
+
 ---
 
 ## 配置
@@ -221,7 +229,7 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 
 ## 架构
 
-- **Host 半** —— `lib/index.js` 组装八个功能模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` / `groupPrompt` 三组 volatile 字段的读取、三个提示词段(`global-prompt` order 50 / `workspace-prompt` order 60 / `group-prompt` order 55)、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读;缓存**按段命名空间隔离**,一段的剔除不会误删另一段的条目)、运行时投影聚合(活跃工作区 + 在线会话清单,经 `GET /api/session-toolkit/state` 送出),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
+- **Host 半** —— `lib/index.js` 组装九个模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`、`session-search.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` / `groupPrompt` 三组 volatile 字段的读取、三个提示词段(`global-prompt` order 50 / `workspace-prompt` order 60 / `group-prompt` order 55)、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读;缓存**按段命名空间隔离**,一段的剔除不会误删另一段的条目)、运行时投影聚合(活跃工作区 + 在线会话清单,经 `GET /api/session-toolkit/state` 送出),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
 - **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;四个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区 / 组)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件;每文件状态来自 `GET /api/session-toolkit/state` 的轮询投影)与组编辑器(组的新增/改名/删除、启用开关、正文、引用文件,以及会话选择器:在线会话按 `title ?? 短 id` 列出,已存但离线的成员标**未在线**)。
 
 ### 注册的 Slots
@@ -259,7 +267,7 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 
 ### 工具面
 
-`send_to_session`、`list_sessions`、`inbox_check`、`create_session` 与 `rename_session` 在 host 平面注册,所有会话可见(subagent 经常驻 preset 组装继承)。参数与返回均为 JSON 兼容。**五个工具都会向模型暴露**,因此 `create_session` 的语义后果(创建即产生一条真实用户消息并消耗一次模型调用)对模型是可见的。(`inbox_check` 只读、无副作用,目标恒为调用者自己的会话。)
+`send_to_session`、`list_sessions`、`inbox_check`、`create_session`、`rename_session` 与 `search_sessions` 在 host 平面注册,所有会话可见(subagent 经常驻 preset 组装继承)。参数与返回均为 JSON 兼容。**六个工具都会向模型暴露**,因此 `create_session` 的语义后果(创建即产生一条真实用户消息并消耗一次模型调用)对模型是可见的。(`inbox_check` 只读、无副作用,目标恒为调用者自己的会话;`search_sessions` 同为只读——它只扫描会话数据并返回坐标,不写入任何会话日志。)
 
 ---
 
