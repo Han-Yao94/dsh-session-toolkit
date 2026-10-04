@@ -3197,7 +3197,7 @@ collect('peer-message', apply);
             className: 'ss-hit',
             children: [
               react_jsx_runtime.jsx('div', { className: 'ss-hit-meta', children: meta }, 'meta'),
-              react_jsx_runtime.jsx('p', { className: 'ss-hit-text', children: String(match.text === undefined ? '' : match.text) }, 'text')
+              react_jsx_runtime.jsx('p', { className: 'ss-hit-text', children: String(match.snippet === undefined ? '' : match.snippet) }, 'text')
             ]
           }, 'hit-' + String(mi));
         }).filter(function (node) { return node !== null; });
