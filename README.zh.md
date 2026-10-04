@@ -43,7 +43,7 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 
 迭代源码时可安装 checkout(`dsh plugin --profile web add <源码路径>`,使用 pnpm `link:` 依赖),或手工 junction 到 profile 的 `node_modules` 并在 profile 的 `cordis.patch.yml` 显式 `- insert:` 注册。推荐使用官方 `dsh plugin add` 流程。
 
-维护者的验证门——对全部随包 JS 跑语法检查,另加打包契约(入口可达、import 声明完整、双语 README 版本一致)——针对源码 checkout 运行。它**不在本仓库里,也不随发布包分发**:本仓库只跟踪 `lib/`、`client/`、`cordis.patch.yml`、两份 README 与 `package.json`。该门断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。两条汇总命令(`pnpm check`、`pnpm verify`)只覆盖语法检查与这份打包契约——**都不跑任何判据门**;判据门一律逐门单跑,各自带自己的退出码约定。
+维护者的验证门——对全部随包 JS 跑语法检查,另加打包契约(入口可达、import 声明完整、双语 README 版本一致)——针对源码 checkout 运行。它**不在本仓库里,也不随发布包分发**:本仓库跟踪的是插件源码与其文档——`lib/`、`client/`、`cordis.patch.yml`、两份 README 加 `README.i18n.yaml`、`LICENSE`、`package.json` 与 `.gitignore`;`scripts/` 与 `.github/` 有意不入库。该门断言「工作区内容 == 包内容」,因此一旦有人给 `package.json` 加上 `prepare`/`prepack`/`prepublishOnly` 脚本,它会**故意报错**。两条汇总命令(`pnpm check`、`pnpm verify`)只覆盖语法检查与这份打包契约——**都不跑任何判据门**;判据门一律逐门单跑,各自带自己的退出码约定。
 
 ---
 
@@ -59,7 +59,7 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 #### 全局提示词(Global Prompt)
 设置页(`settings.section`,id `global-prompt`,order 30),以 **Tabs(全局 / 按工作区 / 组)** 渲染。*全局* Tab 注入一段作用于所有会话系统提示词的文本;*按工作区* Tab 注入按工作区提示词;*组* Tab 注入按组提示词(见[组提示词](#组提示词group-prompt))。这三者、会话身份与入站 peer 消息纪律段,合起来就是本插件贡献的五个提示词段——文末的[提示词段位图](#提示词段位图)把它们的顺序与作用对象列成一张表。
 
-同一个 webServer 上另注册只读状态路由 `GET /api/session-toolkit/state`(活跃工作区 + 引用文件读取状态 + 组选择器要用的在线会话清单;非 `GET` 一律 405),设置页据此读取这些运行时投影——它们不占 settings 命名空间、也从不落盘。
+同一个 webServer 上另注册两条只读路由:状态路由 `GET /api/session-toolkit/state`(活跃工作区 + 引用文件读取状态 + 组选择器要用的在线会话清单;非 `GET` 一律 405),设置页据此读取这些运行时投影——它们不占 settings 命名空间、也从不落盘;以及检索路由 `GET /api/session-toolkit/search`,即跨会话检索面板的数据来源。后者与模型工具 `search_sessions` **共用同一段字面扫描**(`q` 加可选的 `cwd` / `since` / `surfaces` / `limit` / `perSession` / `maxSessions`):参数不合法答 400 `{ ok: false, error, errorText }`,扫不到任何命中仍是 `200` + `ok: true` 且 0 命中。它**不是**全文检索:内核全文索引默认关闭(`openAt: never`),启用它也不会改变这条路径。
 
 #### 工作区提示词(Workspace Prompt)
 为 `cwd` 前缀匹配到已配置工作区目录(该目录及子目录)的会话注入按工作区提示词。工作区列表由**活跃会话的 `cwd`** 聚合而来(`ctx.agents.roots()`,去重并按会话数计数)。当多个已启用工作区前缀命中某会话的 `cwd` 时,取**最具体(路径最深/最长)**者。`removed` 记录用户已移除的路径,使活跃工作区同步不重新补回。工作区行的启用开关 **即时保存(live-save)**;「保存」按钮仅持久化提示词**内容 + 引用文件**。
@@ -230,7 +230,7 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 ## 架构
 
 - **Host 半** —— `lib/index.js` 组装九个模块(`identity.js`、`global-prompt.js`、`auto-resume.js`、`peer-message.js`、`session-admin.js`、`log-reposition.js`、`prompt-dedup.js`、`prompt-literal.js`、`session-search.js`)。`inject` 为模块依赖去重并集;每个模块的 `apply` 在 `safe()` 守卫内运行,单个模块失败不影响整包。所有贡献均绑定生命周期(提示词段与 HTTP 路由用 `ctx.effect`,工具随插件 fiber 注册;定时器统一走 `timer` 服务)。`global-prompt.js` 拥有 `globalPrompt` / `workspacePrompt` / `groupPrompt` 三组 volatile 字段的读取、三个提示词段(`global-prompt` order 50 / `workspace-prompt` order 60 / `group-prompt` order 55)、`readPromptFiles` 辅助函数(实时 `fs.readFileSync` 读;缓存**按段命名空间隔离**,一段的剔除不会误删另一段的条目)、运行时投影聚合(活跃工作区 + 在线会话清单,经 `GET /api/session-toolkit/state` 送出),以及把新出现的工作区路径经 `ctx.get('settings').update('session-toolkit', …)` 补进条目 config。
-- **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;四个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区 / 组)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件;每文件状态来自 `GET /api/session-toolkit/state` 的轮询投影)与组编辑器(组的新增/改名/删除、启用开关、正文、引用文件,以及会话选择器:在线会话按 `title ?? 短 id` 列出,已存但离线的成员标**未在线**)。
+- **Client 半** —— `client/client.js` 为单一 `window.__ModuleLoader__.load` bundle;五个 UI 模块内联在 IIFE 中,在一个 `apply` 里按序注册全部 slot(逐模块守卫)。所有 UI 用 `React.createElement`;样式以 `data-plugin` style 标签注入,使用主题 CSS 变量与深色覆盖;无全局 DOM 操作。global-prompt 模块渲染 **Tabs(全局 / 按工作区 / 组)** 页面,并含可复用 `FileRefsPanel`(添加/移除引用文件;每文件状态来自 `GET /api/session-toolkit/state` 的轮询投影)与组编辑器(组的新增/改名/删除、启用开关、正文、引用文件,以及会话选择器:在线会话按 `title ?? 短 id` 列出,已存但离线的成员标**未在线**)。
 
 ### 注册的 Slots
 
@@ -244,6 +244,8 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 | `conversation.input.left` | `session-identity-input` | order 40 | 身份按钮(工具行) |
 | `conversation.session.header.utilities` | `session-log-download` | priority −1(遮蔽) | 隐藏官方按钮 |
 | `sidebar.workspaces.session.menu.item` | `dsh-session-toolkit.copy-session-id` | order 500 | 复制会话 ID(会话行 ⋯ 菜单) |
+| `conversation.session.header.actions` | `dsh-session-toolkit.search-toggle` | order 35 | 跨会话检索面板开关 |
+| `shell.overlay` | `dsh-session-toolkit.search-panel` | order 100 | 跨会话检索面板(浮层) |
 
 ---
 
@@ -277,7 +279,7 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 
 - **框架**:`@deepseek-ai/cordis` 4.0.4 与 `@deepseek-ai/schemastery` 3.18.4(即 `dsh-v0.2.0-rc.1` vendored 的版本)。`@deepseek-ai/schemastery` 的下限是 `^3.18.4`:`volatile()` 自 3.18.3 才存在,更早的版本会让 `Config` 构造直接抛错。插件经 cordis harness 加载,并以 `dsh.bundle.patch` 注册为 bundle。
 - **Host 服务**(已对照原生源码校验):本条目 `Config` 的 `volatile()` 字段 + `.get()` 实时读取,提交后由 `ctx.on('loader/volatile-update', …)` 通知(不重挂插件);`ctx.get('settings').update('session-toolkit', patch)` 作为 host 写回条目 config 的入口(工作区自动补回用);`ctx.systemPrompt.section({ name, order, text, interpolate: false })`;`ctx.agents.{ get, resume({ resumeSessionId, agentOptions, setup }), roots, requireInitiator }`;`ctx.sessionController.resolveAgent(sessionId)`;`session.header` 字段(`cwd`、`origin`、`delegationDepth`、`parentSession`、`agentPreset`;没有 `seedLength`);用于等待晚到可选服务的 `ctx.inject(names, cb)`;`ctx.get('webServer').register({ kind: 'exact', path, handler })`;`@deepseek-ai/dsh-tools` 的 `defineTool` + `tools.register()`;以及 `ctx.get('agentDefaultModel')`、`sessionPersistence`、`sessionTitle`、`workspaceRegistry`、`sessionLogDownload`、`timer`、`on`、`effect`。
-- **Client 服务**(已校验):`window.__ModuleLoader__.load({ id, factory })`;`ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)`(**低 priority 遮蔽**);`ctx.get('configForms').get('session-toolkit')` → 表单 `{ getSnapshot()/.value/.status, subscribe, set(field, value), unset(field), mutate(ops, expectedRevision) }`(写入经 host 校验后落盘当前 profile 的 `cordis.patch.yml`);`ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`;只读状态路由 `GET /api/session-toolkit/state`;以及 `timer` client 服务(`ctx.timeout`)。bundle 的运行时 `require` 均解析自模块表种子词(`react`、`react/jsx-runtime`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`、……)。
+- **Client 服务**(已校验):`window.__ModuleLoader__.load({ id, factory })`;`ctx.get('slots')` → `slots.register(meta, render)` / `slots.inject(name, fn)`(**低 priority 遮蔽**);`ctx.get('configForms').get('session-toolkit')` → 表单 `{ getSnapshot()/.value/.status, subscribe, set(field, value), unset(field), mutate(ops, expectedRevision) }`(写入经 host 校验后落盘当前 profile 的 `cordis.patch.yml`);`ctx.get('locale')` → `register(ns, { zh, en })` / `bind(ns)`;只读状态路由 `GET /api/session-toolkit/state` 与只读检索路由 `GET /api/session-toolkit/search`(后者与 `search_sessions` 工具共用同一段字面扫描);以及 `timer` client 服务(`ctx.timeout`)。bundle 的运行时 `require` 均解析自模块表种子词(`react`、`react/jsx-runtime`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`、……)。
 
 ### 配置与设置数据面
 插件的 **host 侧** `Config` 在插件加载时即用 schemastery 校验整棵配置树。解析顺序 = schema 默认 → profile patch(用户层);两者都在 host 侧解析完再交给插件。
@@ -305,7 +307,7 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 ## 已知限制与暂缓事项
 
 - client 半为手工维护的单文件 IIFE 包;新增功能需同步维护 `lib/` 与 `client/client.js` 两处。
-- **client 半的「标识符作用域」没有任何门覆盖。** 调 `react.useState` 的块必须同时 `require('react')`：`react/jsx-runtime` **不提供**它，而缺绑定时组件渲染即抛错；**slot 渲染器会把那个抛错吞掉并丢掉整条 entry**，于是症状是「按钮静默地不见了」，而不是任何人看得见的报错。**这一形态从 2026-09-18（`3e44642` 加了 hooks 调用却没加 require）活到 2026-09-22**，穿过了全部的门。
+- **client 半的「标识符作用域」现在有门覆盖。** `scripts/scope-identifiers.assert.mjs`：某个 IIFE 模块块**用到**某模块别名、而**该块自己没有绑定**它时即报红,并已挂 CI(带 `--selftest`);覆盖边界照实写在它的文件头——只核 `require` 绑定过的别名、不做完整作用域分析,也**不证**「按钮真的在浏览器里渲染出来」。**在这道门存在之前**这一形态是静默的:调 `react.useState` 的块必须同时 `require('react')`：`react/jsx-runtime` **不提供**它，而缺绑定时组件渲染即抛错；**slot 渲染器会把那个抛错吞掉并丢掉整条 entry**，于是症状是「按钮静默地不见了」，而不是任何人看得见的报错。**这一形态从 2026-09-18（`3e44642` 加了 hooks 调用却没加 require）活到 2026-09-22**，穿过了全部的门。
 - **收到的跨会话消息在界面上是「收起的一行」,不是可读的正文。** `send_to_session` 按**生产者归属**记录投递——`source: { kind: 'agent-message', form: 'relay', senderSessionId }`——而客户端对**所有**非人类来源都走它对 turn trigger 的渲染,那一行**默认收起,点开才见正文**。写成 `kind: 'user'` 会像人类消息一样 inline 展开,但会把**另一个 Agent 的话记成用户说的**——而那正是 V4 唯一规定为「生产者拥有」的字段。归属优先;**点那一行即可读到正文**(正文首行仍自带发件人)。
 - **图标名属于集成面。** DSH 0.1.7 把 `@deepseek-ai/dsh-client-ui-primitives` 的图标从 `IconXxxOutline<尺寸>` 改名为 `IconXxxOutlineRegular` / `IconXxxOutlineMedium`(1 px 与 1.3 px 笔画;artwork 保留旧默认 `size`),因此 client 半必须使用**目标 harness** 的名字。不存在的名字求值为 `undefined`,而 `React.createElement(undefined, …)` 会抛错,导致**该组件子树整片空白、而它的导航行照常出现**(注册与渲染是两件事)。**这一形态对其余所有门都是静默的**——语法门、打包门、锚门当时全绿。维护者的门守这一条:它把插件引用到的成员列出来,任何一个未被已装 harness 导出即报错。
 - 平移的 Session log 入口依赖官方 `sessionLogDownload` controller 接口,且复刻官方 0.1.6 的「⋯ 更多操作」菜单形态;**它是冻结的复刻件**:DSH 升级后由维护者对着 harness checkout 重跑一次漂移审计——按同一组锚点双向核对,有漂移就报出来,而不是静默通过。**有意的分叉**:官方 header 菜单此后多了第二项(`feedback`),本复刻件只保留 download;这是**已裁定的状态、不是待决问题**——门把它记成 note 而非失败,正因为"跟随上游新增能力"本身是一个决定,而该决定已于 2026-09-22 作出:**不跟随**。只有确实想要那个 feedback 入口时才需要重开。

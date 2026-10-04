@@ -2966,6 +2966,455 @@ collect('log-reposition', apply);
 collect('peer-message', apply);
     })();
 
+    // ===== 模块 5：跨会话检索面板（session-search，shell.overlay 浮层 + 会话头触发按钮）=====
+    // 数据面 = B 的只读路由（契约已冻结，本模块只消费不定义形状）：
+    //   GET /api/session-toolkit/search?q=&limit=&perSession=&maxSessions=&cwd=&since=&surfaces=
+    //   成功 ⇒ 200 + { ok:true, ... }（与模型工具同形）；失败 ⇒ 400 + { ok:false, error, errorText }
+    // 席位面 = 宿主 slot-catalog 的 `shell.overlay`（kind:'list'、scope:'root'、replaceRisk:'none'）。
+    //   ⚠ 该层本身 click-through，但宿主的 `.overlayLayer > * { pointer-events: auto }` 会给**直系子节点**
+    //   自动 opt-in ⇒ 本模块根节点必须显式设回 `pointerEvents:'none'`（内联样式优先于该类选择器），
+    //   只让卡片自己 opt-in；否则面板一打开就整屏挡住会话。关闭态整个 return null（不渲染 DOM ⇒ 零遮挡）。
+    //
+    // 文案口径（A 明确要求）：**不得承诺全文检索**。本机内核全文检索默认关闭，实际路径是字面扫描，
+    //   因此提示语与空结果文案都按「字面扫描」表述。
+    (function () {
+    var module = { exports: {} };
+    var exports = module.exports;
+    let react = require('react');
+    let react_jsx_runtime = require('react/jsx-runtime');
+    let primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+    var NS = 'session-search-ui';
+    var SEARCH_URL = '/api/session-toolkit/search';
+    var DEFAULT_LIMIT = 20;
+    var DEFAULT_PER_SESSION = 5;
+    var DEFAULT_MAX_SESSIONS = 50;
+    var DEFAULT_SURFACES = 'current,shadowed';
+    var PANEL_ID = 'dsh-session-toolkit.search-panel';
+    var TOGGLE_ID = 'dsh-session-toolkit.search-toggle';
+
+    var zh = {
+      open: '跨会话检索',
+      close: '关闭',
+      title: '跨会话检索',
+      placeholder: '输入要查找的字面文本（大小写不敏感）',
+      search: '检索',
+      searching: '检索中…',
+      hint: '按字面扫描各会话与其工具面上的文本。内核全文检索默认关闭，这不是全文检索。',
+      needQuery: '请输入要检索的内容，然后点「检索」。',
+      noMatch: '扫描完成，未命中任何内容。这是正常空结果，不是失败。',
+      failed: '检索失败：',
+      unreachable: '宿主检索路由不可用（请求未送达）',
+      summary: '扫描 {s} 个会话 · 命中 {m} 个会话 · {n} 条片段',
+      sessionsTruncated: '会话已按上限截断',
+      matchesTruncated: '片段已截断',
+      noTitle: '（无标题）',
+      live: '在线',
+      persisted: '已落盘',
+      coordinate: '坐标',
+      seqLabel: 'seq'
+    };
+    var en = {
+      open: 'Search sessions',
+      close: 'Close',
+      title: 'Search sessions',
+      placeholder: 'Literal text to find (case-insensitive)',
+      search: 'Search',
+      searching: 'Searching…',
+      hint: 'Literal scan over each session and its tool surfaces. Kernel full-text search is off by default; this is not full-text search.',
+      needQuery: 'Type what to search for, then press Search.',
+      noMatch: 'Scan finished with no matches. This is a normal empty result, not a failure.',
+      failed: 'Search failed:',
+      unreachable: 'Host search route unreachable (request not delivered)',
+      summary: 'Scanned {s} sessions · {m} with matches · {n} snippets',
+      sessionsTruncated: 'sessions truncated at the cap',
+      matchesTruncated: 'snippets truncated',
+      noTitle: '(untitled)',
+      live: 'live',
+      persisted: 'persisted',
+      coordinate: 'coord',
+      seqLabel: 'seq'
+    };
+
+    function injectCss() {
+      if (typeof document === 'undefined') return;
+      if (document.getElementById('dsh-session-search-css')) return;
+      var style = document.createElement('style');
+      style.id = 'dsh-session-search-css';
+      style.setAttribute('data-plugin', 'dsh-session-search');
+      style.textContent = CSS;
+      document.head.appendChild(style);
+    }
+
+    var CSS = [
+      '.ss-root{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;padding:8vh 24px 24px;box-sizing:border-box;font-family:var(--dsw-font-family)}',
+      '.ss-card{width:720px;max-width:100%;max-height:78vh;display:flex;flex-direction:column;gap:12px;padding:18px 20px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);box-shadow:var(--dsw-elevation-panel);color:var(--dsw-alias-label-primary);font-size:14px;line-height:1.6}',
+      '.ss-head{display:flex;align-items:center;justify-content:space-between;gap:12px}',
+      '.ss-title{margin:0;font-size:16px;font-weight:600;line-height:1.3}',
+      '.ss-close{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}',
+      '.ss-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+      '.ss-form{display:flex;align-items:center;gap:8px}',
+      '.ss-input{flex:1;min-width:0;height:32px;padding:0 10px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-1);font-family:inherit;font-size:14px;color:var(--dsw-alias-label-primary)}',
+      '.ss-input::placeholder{color:var(--dsw-alias-label-secondary)}',
+      '.ss-input:focus{outline:none;border-color:var(--dsw-alias-border-l2);box-shadow:0 0 0 3px var(--dsw-alias-interactive-bg-hover-accent)}',
+      '.ss-go{flex:none;height:32px;padding:0 14px;border:none;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-primary-foreground);font-family:inherit;font-size:14px;font-weight:500;cursor:pointer}',
+      '.ss-go:disabled{opacity:.5;cursor:not-allowed}',
+      '.ss-hint{margin:0;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary)}',
+      '.ss-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:10px}',
+      '.ss-state{margin:0;padding:6px 0;font-size:13px;color:var(--dsw-alias-label-secondary)}',
+      '.ss-state.ss-err{color:var(--dsw-alias-state-error-primary)}',
+      '.ss-group{display:flex;flex-direction:column;gap:4px}',
+      '.ss-group-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary)}',
+      '.ss-cwd{font-size:12px;font-weight:400;color:var(--dsw-alias-label-secondary);word-break:break-all}',
+      '.ss-badge{flex:none;height:20px;line-height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}',
+      '.ss-badge.ss-live{background:var(--dsw-alias-state-success-tertiary);color:var(--dsw-alias-state-success-primary)}',
+      '.ss-hit{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2)}',
+      '.ss-hit-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+      '.ss-hit-text{margin:0;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary);word-break:break-word;white-space:pre-wrap}',
+      '.ss-tag{flex:none;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-mask-1);color:var(--dsw-alias-label-secondary)}',
+      '',
+    ].join('\n');
+
+    // 面板开关 = 跨 slot 的共享状态。触发按钮与浮层本体注册在**两个不同的 slot 树**里，
+    // 拿不到同一个 React state ⇒ 用模块级 store + 订阅（同文件既有先例：模块级 uiCfg /
+    // identityCharLimit 也是这种跨组件的模块级状态）。
+    var panelOpen = false;
+    var panelListeners = [];
+    function setPanelOpen(next) {
+      if (panelOpen === next) return;
+      panelOpen = next;
+      var snapshot = panelListeners.slice();
+      snapshot.forEach(function (fn) {
+        try { fn(panelOpen); } catch (e) {
+          if (typeof console !== 'undefined' && console.warn) console.warn('[session-search] panel listener failed: ' + (e && e.message ? e.message : String(e)));
+        }
+      });
+    }
+    function usePanelOpen() {
+      var state = react.useState(panelOpen);
+      var value = state[0];
+      var setValue = state[1];
+      react.useEffect(function () {
+        var listener = function (next) { setValue(next); };
+        panelListeners.push(listener);
+        // 订阅建立前状态可能已经变过（首渲染与 effect 之间）
+        if (panelOpen !== value) setValue(panelOpen);
+        return function () {
+          var at = panelListeners.indexOf(listener);
+          if (at !== -1) panelListeners.splice(at, 1);
+        };
+      }, []);
+      return value;
+    }
+
+    function formatTime(ms) {
+      if (typeof ms !== 'number' || !isFinite(ms)) return '';
+      try { return new Date(ms).toLocaleString(); } catch (e) { return String(ms); }
+    }
+    function shortId(id) {
+      var s = String(id === undefined || id === null ? '' : id);
+      return s.length > 12 ? s.slice(0, 12) : s;
+    }
+    function fill(template, vars) {
+      var out = String(template);
+      Object.keys(vars).forEach(function (k) { out = out.split('{' + k + '}').join(String(vars[k])); });
+      return out;
+    }
+
+    /** 会话头触发按钮：开/关检索面板（沿用同模块复制按钮的 24×24 图标按钮形态）。 */
+    function SearchToggleAction(props) {
+      var t = props.t;
+      var open = usePanelOpen();
+      return react_jsx_runtime.jsx('button', {
+        type: 'button',
+        onClick: function () { setPanelOpen(!panelOpen); },
+        title: t('open'),
+        'aria-label': t('open'),
+        'aria-expanded': open ? 'true' : 'false',
+        style: {
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          padding: 0,
+          border: 'none',
+          borderRadius: 6,
+          background: open ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
+          color: open ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
+          cursor: 'pointer'
+        },
+        children: react_jsx_runtime.jsx(primitives.IconSearchOutlineRegular, { size: 16 })
+      });
+    }
+
+    /** 命中结果：按会话分组；每组头给标题/cwd/sessionId 坐标/会话状态/命中数。 */
+    function renderResults(result, t) {
+      var returned = result && result.returned ? result.returned : {};
+      var scanned = result && result.scanned ? result.scanned : {};
+      var truncated = result && result.truncated ? result.truncated : {};
+      var sessions = result && Array.isArray(result.sessions) ? result.sessions : [];
+      var children = [];
+      var truncatedSessions = truncated.sessions === true;
+      var summaryText = fill(t('summary'), {
+        s: scanned.sessionsScanned === undefined ? '?' : scanned.sessionsScanned,
+        m: returned.sessions === undefined ? sessions.length : returned.sessions,
+        n: returned.matches === undefined ? '?' : returned.matches
+      });
+      if (truncatedSessions) summaryText = summaryText + ' · ' + t('sessionsTruncated');
+      children.push(react_jsx_runtime.jsx('p', { className: 'ss-hint', children: summaryText }, 'summary'));
+
+      sessions.forEach(function (session, si) {
+        if (!session || typeof session !== 'object') return;
+        var matches = Array.isArray(session.matches) ? session.matches : [];
+        var title = typeof session.title === 'string' && session.title.length > 0 ? session.title : t('noTitle');
+        var hitsTruncated = session.matchesTruncated === true;
+        var headChildren = [
+          react_jsx_runtime.jsx('span', { children: title }, 'title'),
+          react_jsx_runtime.jsx('span', { className: 'ss-tag', children: t('coordinate') + ' ' + shortId(session.sessionId) }, 'sid')
+        ];
+        if (typeof session.cwd === 'string' && session.cwd.length > 0) {
+          headChildren.push(react_jsx_runtime.jsx('span', { className: 'ss-cwd', children: session.cwd }, 'cwd'));
+        }
+        headChildren.push(react_jsx_runtime.jsx('span', {
+          className: 'ss-badge' + (session.live === true ? ' ss-live' : ''),
+          children: session.live === true ? t('live') : t('persisted')
+        }, 'state'));
+        headChildren.push(react_jsx_runtime.jsx('span', {
+          className: 'ss-badge',
+          children: String(typeof session.matchCount === 'number' ? session.matchCount : matches.length) + (hitsTruncated ? ' ' + t('matchesTruncated') : '')
+        }, 'count'));
+
+        var hitNodes = matches.map(function (match, mi) {
+          if (!match || typeof match !== 'object') return null;
+          var meta = [
+            react_jsx_runtime.jsx('span', { className: 'ss-tag', children: t('seqLabel') + ' ' + String(match.seq) }, 'seq'),
+            react_jsx_runtime.jsx('span', { className: 'ss-tag', children: String(match.surface === undefined ? '' : match.surface) }, 'surface'),
+            react_jsx_runtime.jsx('span', { className: 'ss-tag', children: String(match.type === undefined ? '' : match.type) }, 'type')
+          ];
+          var timeText = formatTime(match.time);
+          if (timeText.length > 0) meta.push(react_jsx_runtime.jsx('span', { children: timeText }, 'time'));
+          return react_jsx_runtime.jsx('div', {
+            className: 'ss-hit',
+            children: [
+              react_jsx_runtime.jsx('div', { className: 'ss-hit-meta', children: meta }, 'meta'),
+              react_jsx_runtime.jsx('p', { className: 'ss-hit-text', children: String(match.text === undefined ? '' : match.text) }, 'text')
+            ]
+          }, 'hit-' + String(mi));
+        }).filter(function (node) { return node !== null; });
+
+        children.push(react_jsx_runtime.jsx('div', {
+          className: 'ss-group',
+          children: [
+            react_jsx_runtime.jsx('div', { className: 'ss-group-head', children: headChildren }, 'head'),
+            react_jsx_runtime.jsx('div', { children: hitNodes }, 'hits')
+          ]
+        }, 'group-' + String(si)));
+      });
+
+      return react_jsx_runtime.jsx('div', { className: 'ss-body', children: children });
+    }
+
+    /**
+     * 检索面板本体（注册在 `shell.overlay`）。
+     * 三态**分开渲染**（A 的硬要求）：空结果 / 失败 / 有结果，互不借用文案。
+     * 并发：请求号 + AbortController，只接受最后一次请求的响应（陈旧响应丢弃，不覆盖新结果）。
+     */
+    function SearchPanel(props) {
+      var t = props.t;
+      var open = usePanelOpen();
+      var inputState = react.useState('');
+      var query = inputState[0];
+      var setQuery = inputState[1];
+      var statusState = react.useState('idle');
+      var status = statusState[0];
+      var setStatus = statusState[1];
+      var resultState = react.useState(null);
+      var result = resultState[0];
+      var setResult = resultState[1];
+      var messageState = react.useState('');
+      var message = messageState[0];
+      var setMessage = messageState[1];
+      var seqRef = react.useRef(0);
+      var abortRef = react.useRef(null);
+      var inputRef = react.useRef(null);
+
+      var submit = function () {
+        var q = String(query).trim();
+        if (q.length === 0) {
+          setStatus('error');
+          setResult(null);
+          setMessage(t('needQuery'));
+          return;
+        }
+        var seq = seqRef.current + 1;
+        seqRef.current = seq;
+        if (abortRef.current !== null) {
+          try { abortRef.current.abort(); } catch (e) { /* 旧请求作废，失败无需上报 */ }
+          abortRef.current = null;
+        }
+        var controller = typeof AbortController === 'function' ? new AbortController() : null;
+        abortRef.current = controller;
+        setStatus('loading');
+        setMessage('');
+        var url = SEARCH_URL + '?q=' + encodeURIComponent(q)
+          + '&limit=' + String(DEFAULT_LIMIT)
+          + '&perSession=' + String(DEFAULT_PER_SESSION)
+          + '&maxSessions=' + String(DEFAULT_MAX_SESSIONS)
+          + '&surfaces=' + encodeURIComponent(DEFAULT_SURFACES);
+        var init = { method: 'GET', cache: 'no-store', headers: { accept: 'application/json' } };
+        if (controller !== null) init.signal = controller.signal;
+        fetch(url, init).then(function (response) {
+          return response.json().then(
+            function (body) { return { status: response.status, body: body }; },
+            function () { return { status: response.status, body: null }; }
+          );
+        }).then(function (out) {
+          if (seqRef.current !== seq) return;   // 陈旧响应：丢弃
+          var body = out && out.body ? out.body : null;
+          if (body === null || body.ok !== true) {
+            var detail = body !== null && typeof body.errorText === 'string' && body.errorText.length > 0
+              ? body.errorText
+              : 'HTTP ' + String(out ? out.status : '?');
+            setStatus('error');
+            setResult(null);
+            setMessage(detail);
+            return;
+          }
+          var matches = body.returned && typeof body.returned.matches === 'number' ? body.returned.matches : -1;
+          setResult(body);
+          setStatus(matches === 0 ? 'empty' : 'ok');
+        }).catch(function (error) {
+          if (seqRef.current !== seq) return;   // 被 abort 或已被更新的请求取代
+          setStatus('error');
+          setResult(null);
+          setMessage(t('unreachable') + '（' + (error && error.message ? error.message : String(error)) + '）');
+        });
+      };
+
+      react.useEffect(function () {
+        if (open === true && inputRef.current !== null && typeof inputRef.current.focus === 'function') inputRef.current.focus();
+      }, [open]);
+
+      // 卸载时作废在途请求（组件生命周期归属插件 fiber，登记一次清理）
+      react.useEffect(function () {
+        return function () {
+          if (abortRef.current !== null) {
+            try { abortRef.current.abort(); } catch (e) { /* 忽略 */ }
+            abortRef.current = null;
+          }
+        };
+      }, []);
+
+      if (open !== true) return null;   // 关闭态：不渲染任何 DOM ⇒ 零遮挡
+
+      var children = [];
+      children.push(react_jsx_runtime.jsx('div', {
+        className: 'ss-head',
+        children: [
+          react_jsx_runtime.jsx('h3', { className: 'ss-title', children: t('title') }, 'title'),
+          react_jsx_runtime.jsx('button', {
+            type: 'button',
+            className: 'ss-close',
+            onClick: function () { setPanelOpen(false); },
+            title: t('close'),
+            'aria-label': t('close'),
+            children: react_jsx_runtime.jsx(primitives.IconCloseOutlineRegular, { size: 16 })
+          }, 'close')
+        ]
+      }, 'head'));
+
+      children.push(react_jsx_runtime.jsx('div', {
+        className: 'ss-form',
+        children: [
+          react_jsx_runtime.jsx('input', {
+            className: 'ss-input',
+            type: 'text',
+            value: query,
+            placeholder: t('placeholder'),
+            disabled: status === 'loading',
+            ref: inputRef,
+            onChange: function (e) { setQuery(e && e.target ? String(e.target.value) : ''); },
+            onKeyDown: function (e) {
+              // 口径（#77-C-1 的同类裁定）：回车不提交，必须点「检索」按钮才发起请求
+              if (e && e.key === 'Enter') e.preventDefault();
+            }
+          }, 'input'),
+          react_jsx_runtime.jsx('button', {
+            type: 'button',
+            className: 'ss-go',
+            disabled: status === 'loading',
+            onClick: submit,
+            children: status === 'loading' ? t('searching') : t('search')
+          }, 'go')
+        ]
+      }, 'form'));
+
+      if (status === 'idle') {
+        children.push(react_jsx_runtime.jsx('p', { className: 'ss-hint', children: t('hint') }, 'hint'));
+      } else if (status === 'loading') {
+        children.push(react_jsx_runtime.jsx('p', { className: 'ss-state', children: t('searching') }, 'loading'));
+      } else if (status === 'error') {
+        children.push(react_jsx_runtime.jsx('div', {
+          className: 'ss-state ss-err',
+          children: [
+            react_jsx_runtime.jsx('span', { children: t('failed') }, 'label'),
+            react_jsx_runtime.jsx('span', { children: message }, 'message')
+          ]
+        }, 'error'));
+      } else if (status === 'empty') {
+        children.push(react_jsx_runtime.jsx('p', { className: 'ss-state', children: t('noMatch') }, 'empty'));
+      } else {
+        children.push(renderResults(result, t));
+      }
+
+      return react_jsx_runtime.jsx('div', {
+        className: 'ss-root',
+        style: { pointerEvents: 'none' },
+        children: react_jsx_runtime.jsx('div', {
+          className: 'ss-card',
+          style: { pointerEvents: 'auto' },
+          children: children
+        })
+      });
+    }
+
+    var inject = ['slots', 'locale'];
+
+    function apply(ctx) {
+      var locale = ctx.get('locale');
+      var t = function (k) { return zh[k] || k; };
+      if (locale) {
+        ctx.effect(function () { return locale.register(NS, { zh: zh, en: en }); }, 'dsh-session-search: locale');
+        t = locale.bind(NS);
+      }
+      injectCss();
+
+      // 面板本体：`shell.overlay` 的**新 id**（additive，不替换任何在册 occupant）。
+      // order 100：只决定同层 occupant 的相对顺序，本层既有项是浮标/toast 语义，面板排在它们之后。
+      ctx.slots.inject('shell.overlay', function () {
+        return ctx.slots.register({
+          name: 'shell.overlay',
+          id: PANEL_ID,
+          order: 100,
+          label: function () { return t('title'); }
+        }, function () { return react_jsx_runtime.jsx(SearchPanel, { t: t }); });
+      });
+
+      // 触发按钮：复用会话头 actions（本插件已在同席注册 2 个 id，这里追加自有 id；order 35 落在
+      // 复制按钮 30 与身份按钮 40 之间）。
+      ctx.slots.inject('conversation.session.header.actions', function () {
+        return ctx.slots.register({
+          name: 'conversation.session.header.actions',
+          id: TOGGLE_ID,
+          order: 35
+        }, function () { return react_jsx_runtime.jsx(SearchToggleAction, { t: t }); });
+      });
+    }
+
+collect('session-search', apply);
+    })();
+
+
     function apply(ctx) {
       // UI 旋钮 = 本条目 config 的 client.* 字段：先读一次（表单可能仍在 loading，此时保持
       // 兜底值），再订阅补齐。订阅生命周期随本插件 fiber。

@@ -36,7 +36,9 @@
     "assert:workspace-prompt": "node scripts/workspace-prompt.guard.assert.mjs",
     "assert:workspace-prompt:selftest": "node scripts/workspace-prompt.guard.assert.mjs --selftest",
     "assert:group-prompt": "node scripts/group-prompt.contract.assert.mjs",
-    "assert:group-prompt:selftest": "node scripts/group-prompt.contract.assert.mjs --selftest"
+    "assert:group-prompt:selftest": "node scripts/group-prompt.contract.assert.mjs --selftest",
+    "assert:session-search": "node scripts/session-search.assert.mjs",
+    "assert:session-search:selftest": "node scripts/session-search.assert.mjs --selftest"
   },
   "main": "lib/index.js",
   "exports": {
