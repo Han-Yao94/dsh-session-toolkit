@@ -37,7 +37,7 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 - **GitHub**:`dsh plugin --profile web add github:Han-Yao94/dsh-session-toolkit`。
 - **tarball**:`pnpm pack` → `dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz`。
 
-运行时依赖(`@deepseek-ai/schemastery`(下限 `^3.18.4`——`volatile()` 自 3.18.3 起才有)、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`)声明在 `dependencies`,随安装自动拉取;平台模块(`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`)为 `peerDependencies`,由 DSH 宿主提供。harness 提供的包一律**只写一个前置版本代**——`^0.2.0-rc.1`:caret 区间不跨 minor,而 semver 还额外要求"比较器里必须有一个指明**候选人自身 `major.minor.patch`** 的前置版本",这正是当初要写成 `^0.1.2-alpha.5 || ^0.1.6-alpha.2` 并集的原因,也正是解析偏斜的根因(插件拿到自己的旧副本、宿主在跑新版本)。既然 `dsh-v0.2.0-rc.1` 已是最低支持版本,旧的并集成员已删除:**今后每次 harness 换代都必须同步抬高这些区间**,而针对已装 profile 做一次依赖解析偏斜测量(期望 `SKEW_COUNT=0`)就是告诉你该抬了的那个检查。区间只在安装期生效——重新安装并重启 GUI 之后再量。`@deepseek-ai/dsh-client-ui-slots` 刻意不声明:`slots` 服务由 web shell 播种,npm peer 声明是死重。已验证:打包 tgz 的干净安装可完整解析所有 import(不依赖本地 junction)。另有两条**安装侧**检查(需要外部 checkout/profile,因此不挂 CI):针对已装 profile 的依赖解析偏斜测量,与针对 harness checkout 的冻结复刻件漂移审计。两者都在维护者的工作副本里。
+运行时依赖(`@deepseek-ai/schemastery`(下限 `^3.18.4`——`volatile()` 自 3.18.3 起才有)、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-home-paths`)声明在 `dependencies`,随安装自动拉取;平台模块(`react`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-primitives`)为 `peerDependencies`,由 DSH 宿主提供。harness 提供的包一律**只写一个前置版本代**——`^0.2.0-rc.1`:caret 区间不跨 minor,而 semver 还额外要求"比较器里必须有一个指明**候选人自身 `major.minor.patch`** 的前置版本",这正是当初要写成 `^0.1.2-alpha.5 || ^0.1.6-alpha.2` 并集的原因,也正是解析偏斜的根因(插件拿到自己的旧副本、宿主在跑新版本)。既然 `dsh-v0.2.0-rc.1` 已是最低支持版本,旧的并集成员已删除:**今后每次 harness 换代都必须同步抬高这些区间**,而针对已装 profile 做一次依赖解析偏斜测量(期望 `SKEW_COUNT=0`)就是告诉你该抬了的那个检查。区间只在安装期生效——重新安装并重启 DSH 客户端之后再量。`@deepseek-ai/dsh-client-ui-slots` 刻意不声明:`slots` 服务由 web shell 播种,npm peer 声明是死重。已验证:打包 tgz 的干净安装可完整解析所有 import(不依赖本地 junction)。另有两条**安装侧**检查(需要外部 checkout/profile,因此不挂 CI):针对已装 profile 的依赖解析偏斜测量,与针对 harness checkout 的冻结复刻件漂移审计。两者都在维护者的工作副本里。
 
 ### 本地开发
 
@@ -88,12 +88,12 @@ dsh plugin --profile web add ./dsh-session-toolkit-<version>.tgz
 ### 会话管道
 
 #### 会话自动恢复(Session Auto-Resume)
-开启开关的会话在 GUI 重启后自动恢复,优先走**官方恢复链路**(`ctx.sessionController.resolveAgent`)——它除了 mount preset,还会通过 `installSelection` 恢复会话自己的模型选择,并做 subagent 归属校验与并发恢复去重;0.1.6 之前没有该服务的内核回落为 `ctx.agents.resume` + 手工 mount preset,并携带 `agentDefaultModel` 的默认模型。开启某会话即立即恢复(false→true 边沿)。过滤:开关开启、仅顶层(无 subagent origin、无 `delegationDepth > 0`、无 `parentSession`)、非空白(快照形状的 `eventCount !== 0`)。并发受限(缺省 3,可由 `autoResume.concurrency` 配置),逐项失败隔离 + 在途集合防重复恢复。
+开启开关的会话在 DSH 客户端重启后自动恢复,优先走**官方恢复链路**(`ctx.sessionController.resolveAgent`)——它除了 mount preset,还会通过 `installSelection` 恢复会话自己的模型选择,并做 subagent 归属校验与并发恢复去重;0.1.6 之前没有该服务的内核回落为 `ctx.agents.resume` + 手工 mount preset,并携带 `agentDefaultModel` 的默认模型。开启某会话即立即恢复(false→true 边沿)。过滤:开关开启、仅顶层(无 subagent origin、无 `delegationDepth > 0`、无 `parentSession`)、非空白(快照形状的 `eventCount !== 0`)。并发受限(缺省 3,可由 `autoResume.concurrency` 配置),逐项失败隔离 + 在途集合防重复恢复。
 
 #### 会话管理(Session Admin)
 host 平面另注册两个工具,**与 `send_to_session` / `list_sessions` 同平面**:
 
-- **`create_session`** —— 自主创建一个新的顶层会话(GUI 左侧导航里的一个聊天窗口)。**`cwd` 与 `prompt` 均必填**:`cwd` 必须是绝对路径(无 `cwd` 的会话不会进宿主列表),`prompt` 是新会话的首条消息。创建成功即产生一条真实用户消息(**会真实跑一轮模型、消耗一次调用**);按内核设计,产生过事件的会话会被持久化,因此**本工具不提供「只登记、不说话」的临时会话**。可选 `title` 会立即设定标题并 pin 住。返回体含 `sessionId`、`cwd`、`status`、`title` 与 `notes`。
+- **`create_session`** —— 自主创建一个新的顶层会话(DSH 客户端左侧导航里的一个聊天窗口)。**`cwd` 与 `prompt` 均必填**:`cwd` 必须是绝对路径(无 `cwd` 的会话不会进宿主列表),`prompt` 是新会话的首条消息。创建成功即产生一条真实用户消息(**会真实跑一轮模型、消耗一次调用**);按内核设计,产生过事件的会话会被持久化,因此**本工具不提供「只登记、不说话」的临时会话**。可选 `title` 会立即设定标题并 pin 住。返回体含 `sessionId`、`cwd`、`status`、`title` 与 `notes`。
 - **`rename_session`** —— 修改一个**在线(live)**会话的标题。改名会 **pin 住标题**,不再被自动标题生成覆盖。目标必须是顶层会话且当前在线:目标是子会话(`origin=subagent` 或 `delegationDepth>0`)时明确拒绝,不静默改写。
 
 两者都以**结构化结果**返回(**工具执行本身不抛未捕获异常**):成功 `{ ok: true, … }`,失败 `{ ok: false, error: '<码>', errorText: '<原始原因>' }`。错误码:`MODEL_UNAVAILABLE` / `MODEL_SELECTION_FAILED` / `MODEL_SELECTION_INVALID` / `EMPTY_CWD` / `CWD_NOT_ABSOLUTE` / `EMPTY_PROMPT` / `PROMPT_TOO_LONG` / `PRESET_RESOLVE_FAILED` / `CREATE_FAILED` / `CREATE_UNAVAILABLE` / `CREATE_NO_AGENT` / `EMPTY_TARGET` / `EMPTY_TITLE` / `SESSION_UNAVAILABLE` / `TARGET_IS_SUBAGENT` / `TITLE_SERVICE_UNAVAILABLE` / `UNEXPECTED`。
@@ -324,4 +324,4 @@ DSH 0.1.7 起,settings 只投影**带 `volatile()` 的字段**,并只用两个�
 
 ## 恢复方法
 
-卸载 bundle:`dsh plugin --profile web remove dsh-session-toolkit`,然后重启 GUI。要回退到整合前的布局,请重新启用原插件而非安装本包。
+卸载 bundle:`dsh plugin --profile web remove dsh-session-toolkit`,然后重启 DSH 客户端。要回退到整合前的布局,请重新启用原插件而非安装本包。

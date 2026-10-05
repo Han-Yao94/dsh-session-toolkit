@@ -218,7 +218,7 @@ window.__ModuleLoader__.load({
     unsaved: '未保存',
     close: '关闭',
     autoResumeLabel: '重启后自动上线',
-    autoResumeHint: '开启后，每次重启 GUI 该会话自动恢复在线；关闭不影响当前状态，仅影响下次重启。',
+    autoResumeHint: '开启后，每次重启 DSH 客户端该会话自动恢复在线；关闭不影响当前状态，仅影响下次重启。',
     autoResumeError: '保存失败，请重试',
   };
 
@@ -255,7 +255,7 @@ window.__ModuleLoader__.load({
     unsaved: 'Unsaved',
     close: 'Close',
     autoResumeLabel: 'Auto-resume after restart',
-    autoResumeHint: 'When on, this session resumes online automatically after each GUI restart; turning off does not affect the current state, only the next restart.',
+    autoResumeHint: 'When on, this session resumes online automatically after each DSH client restart; turning off does not affect the current state, only the next restart.',
     autoResumeError: 'Failed to save, please retry',
   };
 
