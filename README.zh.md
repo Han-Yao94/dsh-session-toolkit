@@ -244,8 +244,7 @@ host 平面注册 `send_to_session` / `list_sessions` 工具(按 id 或工作区
 | `conversation.input.left` | `session-identity-input` | order 40 | 身份按钮(工具行) |
 | `conversation.session.header.utilities` | `session-log-download` | priority −1(遮蔽) | 隐藏官方按钮 |
 | `sidebar.workspaces.session.menu.item` | `dsh-session-toolkit.copy-session-id` | order 500 | 复制会话 ID(会话行 ⋯ 菜单) |
-| `conversation.session.header.actions` | `dsh-session-toolkit.search-toggle` | order 35 | 跨会话检索面板开关 |
-| `shell.overlay` | `dsh-session-toolkit.search-panel` | order 100 | 跨会话检索面板(浮层) |
+| `conversation.view` | `dsh-session-toolkit.search-panel` | order 20 | 跨会话检索视图(会话内的 tab 页) |
 
 ---
 

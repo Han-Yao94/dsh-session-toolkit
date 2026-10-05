@@ -2966,14 +2966,14 @@ collect('log-reposition', apply);
 collect('peer-message', apply);
     })();
 
-    // ===== 模块 5：跨会话检索面板（session-search，shell.overlay 浮层 + 会话头触发按钮）=====
+    // ===== 模块 5：跨会话检索视图（session-search，会话内 `conversation.view` 面）=====
     // 数据面 = B 的只读路由（契约已冻结，本模块只消费不定义形状）：
     //   GET /api/session-toolkit/search?q=&limit=&perSession=&maxSessions=&cwd=&since=&surfaces=
     //   成功 ⇒ 200 + { ok:true, ... }（与模型工具同形）；失败 ⇒ 400 + { ok:false, error, errorText }
-    // 席位面 = 宿主 slot-catalog 的 `shell.overlay`（kind:'list'、scope:'root'、replaceRisk:'none'）。
-    //   ⚠ 该层本身 click-through，但宿主的 `.overlayLayer > * { pointer-events: auto }` 会给**直系子节点**
-    //   自动 opt-in ⇒ 本模块根节点必须显式设回 `pointerEvents:'none'`（内联样式优先于该类选择器），
-    //   只让卡片自己 opt-in；否则面板一打开就整屏挡住会话。关闭态整个 return null（不渲染 DOM ⇒ 零遮挡）。
+    // 席位面 = 宿主 slot-catalog 的 `conversation.view`（kind:'list'、scope:'session'、replaceRisk:'none'）。
+    //   宿主把它渲染成会话头部的 view tab，**一次只渲染选中的那一个**（`renderSlot(..., { only: viewId })`）
+    //   ⇒ 本模块不需要浮层、开关状态或关闭按钮：进入本 tab 即渲染，切走即随卸载清理在途请求。
+    //   也**不再有** pointerEvents 覆盖层约定 —— 那是 `shell.overlay` 会给直系子节点自动 opt-in 的产物。
     //
     // 文案口径（A 明确要求）：**不得承诺全文检索**。本机内核全文检索默认关闭，实际路径是字面扫描，
     //   因此提示语与空结果文案都按「字面扫描」表述。
@@ -2989,12 +2989,11 @@ collect('peer-message', apply);
     var DEFAULT_PER_SESSION = 5;
     var DEFAULT_MAX_SESSIONS = 50;
     var DEFAULT_SURFACES = 'current,shadowed';
-    var PANEL_ID = 'dsh-session-toolkit.search-panel';
-    var TOGGLE_ID = 'dsh-session-toolkit.search-toggle';
+    var VIEW_ID = 'dsh-session-toolkit.search-panel';
+    var VIEW_ORDER = 20;
 
     var zh = {
       open: '跨会话检索',
-      close: '关闭',
       title: '跨会话检索',
       placeholder: '输入要查找的字面文本（大小写不敏感）',
       search: '检索',
@@ -3011,11 +3010,12 @@ collect('peer-message', apply);
       live: '在线',
       persisted: '已落盘',
       coordinate: '坐标',
-      seqLabel: 'seq'
+      seqLabel: 'seq',
+      openSession: '打开会话',
+      openSessionUnavailable: '无法打开该会话：宿主未提供会话导航通道'
     };
     var en = {
       open: 'Search sessions',
-      close: 'Close',
       title: 'Search sessions',
       placeholder: 'Literal text to find (case-insensitive)',
       search: 'Search',
@@ -3032,7 +3032,9 @@ collect('peer-message', apply);
       live: 'live',
       persisted: 'persisted',
       coordinate: 'coord',
-      seqLabel: 'seq'
+      seqLabel: 'seq',
+      openSession: 'Open session',
+      openSessionUnavailable: 'Cannot open that session: the host exposes no session navigation channel'
     };
 
     function injectCss() {
@@ -3046,12 +3048,10 @@ collect('peer-message', apply);
     }
 
     var CSS = [
-      '.ss-root{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;padding:8vh 24px 24px;box-sizing:border-box;font-family:var(--dsw-font-family)}',
-      '.ss-card{width:720px;max-width:100%;max-height:78vh;display:flex;flex-direction:column;gap:12px;padding:18px 20px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);box-shadow:var(--dsw-elevation-panel);color:var(--dsw-alias-label-primary);font-size:14px;line-height:1.6}',
+      '.ss-root{display:flex;flex-direction:column;padding:24px;box-sizing:border-box;font-family:var(--dsw-font-family)}',
+      '.ss-card{width:100%;max-width:960px;margin:0 auto;display:flex;flex-direction:column;gap:12px;box-sizing:border-box;color:var(--dsw-alias-label-primary);font-size:14px;line-height:1.6}',
       '.ss-head{display:flex;align-items:center;justify-content:space-between;gap:12px}',
       '.ss-title{margin:0;font-size:16px;font-weight:600;line-height:1.3}',
-      '.ss-close{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}',
-      '.ss-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
       '.ss-form{display:flex;align-items:center;gap:8px}',
       '.ss-input{flex:1;min-width:0;height:32px;padding:0 10px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-1);font-family:inherit;font-size:14px;color:var(--dsw-alias-label-primary)}',
       '.ss-input::placeholder{color:var(--dsw-alias-label-secondary)}',
@@ -3059,7 +3059,7 @@ collect('peer-message', apply);
       '.ss-go{flex:none;height:32px;padding:0 14px;border:none;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-primary-foreground);font-family:inherit;font-size:14px;font-weight:500;cursor:pointer}',
       '.ss-go:disabled{opacity:.5;cursor:not-allowed}',
       '.ss-hint{margin:0;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary)}',
-      '.ss-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:10px}',
+      '.ss-body{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:10px}',
       '.ss-state{margin:0;padding:6px 0;font-size:13px;color:var(--dsw-alias-label-secondary)}',
       '.ss-state.ss-err{color:var(--dsw-alias-state-error-primary)}',
       '.ss-group{display:flex;flex-direction:column;gap:4px}',
@@ -3067,44 +3067,14 @@ collect('peer-message', apply);
       '.ss-cwd{font-size:12px;font-weight:400;color:var(--dsw-alias-label-secondary);word-break:break-all}',
       '.ss-badge{flex:none;height:20px;line-height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}',
       '.ss-badge.ss-live{background:var(--dsw-alias-state-success-tertiary);color:var(--dsw-alias-state-success-primary)}',
-      '.ss-hit{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2)}',
+      '.ss-hit{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2);cursor:pointer}',
+      '.ss-hit:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.ss-hit:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}',
       '.ss-hit-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
       '.ss-hit-text{margin:0;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary);word-break:break-word;white-space:pre-wrap}',
       '.ss-tag{flex:none;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-mask-1);color:var(--dsw-alias-label-secondary)}',
       '',
     ].join('\n');
-
-    // 面板开关 = 跨 slot 的共享状态。触发按钮与浮层本体注册在**两个不同的 slot 树**里，
-    // 拿不到同一个 React state ⇒ 用模块级 store + 订阅（同文件既有先例：模块级 uiCfg /
-    // identityCharLimit 也是这种跨组件的模块级状态）。
-    var panelOpen = false;
-    var panelListeners = [];
-    function setPanelOpen(next) {
-      if (panelOpen === next) return;
-      panelOpen = next;
-      var snapshot = panelListeners.slice();
-      snapshot.forEach(function (fn) {
-        try { fn(panelOpen); } catch (e) {
-          if (typeof console !== 'undefined' && console.warn) console.warn('[session-search] panel listener failed: ' + (e && e.message ? e.message : String(e)));
-        }
-      });
-    }
-    function usePanelOpen() {
-      var state = react.useState(panelOpen);
-      var value = state[0];
-      var setValue = state[1];
-      react.useEffect(function () {
-        var listener = function (next) { setValue(next); };
-        panelListeners.push(listener);
-        // 订阅建立前状态可能已经变过（首渲染与 effect 之间）
-        if (panelOpen !== value) setValue(panelOpen);
-        return function () {
-          var at = panelListeners.indexOf(listener);
-          if (at !== -1) panelListeners.splice(at, 1);
-        };
-      }, []);
-      return value;
-    }
 
     function formatTime(ms) {
       if (typeof ms !== 'number' || !isFinite(ms)) return '';
@@ -3120,35 +3090,8 @@ collect('peer-message', apply);
       return out;
     }
 
-    /** 会话头触发按钮：开/关检索面板（沿用同模块复制按钮的 24×24 图标按钮形态）。 */
-    function SearchToggleAction(props) {
-      var t = props.t;
-      var open = usePanelOpen();
-      return react_jsx_runtime.jsx('button', {
-        type: 'button',
-        onClick: function () { setPanelOpen(!panelOpen); },
-        title: t('open'),
-        'aria-label': t('open'),
-        'aria-expanded': open ? 'true' : 'false',
-        style: {
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          padding: 0,
-          border: 'none',
-          borderRadius: 6,
-          background: open ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
-          color: open ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
-          cursor: 'pointer'
-        },
-        children: react_jsx_runtime.jsx(primitives.IconSearchOutlineRegular, { size: 16 })
-      });
-    }
-
     /** 命中结果：按会话分组；每组头给标题/cwd/sessionId 坐标/会话状态/命中数。 */
-    function renderResults(result, t) {
+    function renderResults(result, t, openHit) {
       var returned = result && result.returned ? result.returned : {};
       var scanned = result && result.scanned ? result.scanned : {};
       var truncated = result && result.truncated ? result.truncated : {};
@@ -3195,6 +3138,18 @@ collect('peer-message', apply);
           if (timeText.length > 0) meta.push(react_jsx_runtime.jsx('span', { children: timeText }, 'time'));
           return react_jsx_runtime.jsx('div', {
             className: 'ss-hit',
+            role: 'button',
+            tabIndex: 0,
+            title: t('openSession'),
+            'aria-label': t('openSession') + ' ' + title,
+            onClick: function () { openHit(session.sessionId); },
+            onKeyDown: function (e) {
+              // 键盘可达（Enter/Space）；Space 必须 preventDefault，否则页面随之滚动
+              if (e && (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar')) {
+                e.preventDefault();
+                openHit(session.sessionId);
+              }
+            },
             children: [
               react_jsx_runtime.jsx('div', { className: 'ss-hit-meta', children: meta }, 'meta'),
               react_jsx_runtime.jsx('p', { className: 'ss-hit-text', children: String(match.snippet === undefined ? '' : match.snippet) }, 'text')
@@ -3215,13 +3170,13 @@ collect('peer-message', apply);
     }
 
     /**
-     * 检索面板本体（注册在 `shell.overlay`）。
+     * 检索视图本体（注册在 `conversation.view`，作为会话内的一个 view tab 渲染）。
      * 三态**分开渲染**（A 的硬要求）：空结果 / 失败 / 有结果，互不借用文案。
      * 并发：请求号 + AbortController，只接受最后一次请求的响应（陈旧响应丢弃，不覆盖新结果）。
      */
     function SearchPanel(props) {
       var t = props.t;
-      var open = usePanelOpen();
+      var ctx = props.ctx;
       var inputState = react.useState('');
       var query = inputState[0];
       var setQuery = inputState[1];
@@ -3234,9 +3189,35 @@ collect('peer-message', apply);
       var messageState = react.useState('');
       var message = messageState[0];
       var setMessage = messageState[1];
+      var noticeState = react.useState('');
+      var notice = noticeState[0];
+      var setNotice = noticeState[1];
       var seqRef = react.useRef(0);
       var abortRef = react.useRef(null);
       var inputRef = react.useRef(null);
+
+      // 打开一条命中所在的会话。
+      // 通道 = 宿主 client 服务「uiWorkspace」的 openSession（会话级：只切主区域显示哪个会话；
+      // 宿主没有把「定位到某个 seq」暴露成公开能力）⇒ 本面板不承诺能定位到那条消息，文案只写
+      // 「打开会话」。服务按可选查找（get + 判空降级），缺失时出声而不是静默。
+      var openHit = function (sessionId) {
+        var workspace = ctx === undefined || ctx === null ? undefined : ctx.get('uiWorkspace');
+        if (workspace === undefined || workspace === null || typeof workspace.openSession !== 'function') {
+          setNotice(t('openSessionUnavailable'));
+          return;
+        }
+        try {
+          workspace.openSession(sessionId);
+        } catch (e) {
+          setNotice(t('openSessionUnavailable') + ' (' + (e && e.message ? e.message : String(e)) + ')');
+          return;
+        }
+        setNotice('');
+        // 迁移到 view 面后的替代：**不再需要任何收起动作**。跳转走的是宿主会话切换
+        // （openSession ⇒ 主区域换成目标会话），本视图属于「当前会话」这一层，随会话切换
+        // 自然离开视野；原浮层的 `setPanelOpen(false)` 只是为了不让覆盖层继续盖在目标会话上，
+        // 该问题在 view 面下不存在。回到本会话时保留上次检索结果，这是有意保留的行为。
+      };
 
       var submit = function () {
         var q = String(query).trim();
@@ -3256,6 +3237,7 @@ collect('peer-message', apply);
         abortRef.current = controller;
         setStatus('loading');
         setMessage('');
+        setNotice('');
         var url = SEARCH_URL + '?q=' + encodeURIComponent(q)
           + '&limit=' + String(DEFAULT_LIMIT)
           + '&perSession=' + String(DEFAULT_PER_SESSION)
@@ -3291,9 +3273,10 @@ collect('peer-message', apply);
         });
       };
 
+      // 进入本视图时把焦点交给输入框（view 面没有「打开」动作，挂载即视为进入）
       react.useEffect(function () {
-        if (open === true && inputRef.current !== null && typeof inputRef.current.focus === 'function') inputRef.current.focus();
-      }, [open]);
+        if (inputRef.current !== null && typeof inputRef.current.focus === 'function') inputRef.current.focus();
+      }, []);
 
       // 卸载时作废在途请求（组件生命周期归属插件 fiber，登记一次清理）
       react.useEffect(function () {
@@ -3305,21 +3288,11 @@ collect('peer-message', apply);
         };
       }, []);
 
-      if (open !== true) return null;   // 关闭态：不渲染任何 DOM ⇒ 零遮挡
-
       var children = [];
       children.push(react_jsx_runtime.jsx('div', {
         className: 'ss-head',
         children: [
-          react_jsx_runtime.jsx('h3', { className: 'ss-title', children: t('title') }, 'title'),
-          react_jsx_runtime.jsx('button', {
-            type: 'button',
-            className: 'ss-close',
-            onClick: function () { setPanelOpen(false); },
-            title: t('close'),
-            'aria-label': t('close'),
-            children: react_jsx_runtime.jsx(primitives.IconCloseOutlineRegular, { size: 16 })
-          }, 'close')
+          react_jsx_runtime.jsx('h3', { className: 'ss-title', children: t('title') }, 'title')
         ]
       }, 'head'));
 
@@ -3364,17 +3337,13 @@ collect('peer-message', apply);
       } else if (status === 'empty') {
         children.push(react_jsx_runtime.jsx('p', { className: 'ss-state', children: t('noMatch') }, 'empty'));
       } else {
-        children.push(renderResults(result, t));
+        if (notice.length > 0) children.push(react_jsx_runtime.jsx('p', { className: 'ss-state ss-err', children: notice }, 'open-error'));
+        children.push(renderResults(result, t, openHit));
       }
 
       return react_jsx_runtime.jsx('div', {
         className: 'ss-root',
-        style: { pointerEvents: 'none' },
-        children: react_jsx_runtime.jsx('div', {
-          className: 'ss-card',
-          style: { pointerEvents: 'auto' },
-          children: children
-        })
+        children: react_jsx_runtime.jsx('div', { className: 'ss-card', children: children })
       });
     }
 
@@ -3389,25 +3358,18 @@ collect('peer-message', apply);
       }
       injectCss();
 
-      // 面板本体：`shell.overlay` 的**新 id**（additive，不替换任何在册 occupant）。
-      // order 100：只决定同层 occupant 的相对顺序，本层既有项是浮标/toast 语义，面板排在它们之后。
-      ctx.slots.inject('shell.overlay', function () {
+      // 视图本体：`conversation.view` 的**自有 id**（不复用宿主既有 view 的 id ⇒ 新增一格，
+      // 不替换任何 occupant）。order 20 落在 chat(0) 与 trajectory(10) 之后。
+      // label 走本模块已注册的 locale 命名空间（与宿主两个自有 view 的写法一致：函数 + locale: NS）。
+      // 宿主渲染条件 = 会话非空白态且 view 数 > 1 ⇒ 对默认安装，本 entry 会让 view tab 条首次出现。
+      ctx.slots.inject('conversation.view', function () {
         return ctx.slots.register({
-          name: 'shell.overlay',
-          id: PANEL_ID,
-          order: 100,
+          name: 'conversation.view',
+          id: VIEW_ID,
+          order: VIEW_ORDER,
+          locale: NS,
           label: function () { return t('title'); }
-        }, function () { return react_jsx_runtime.jsx(SearchPanel, { t: t }); });
-      });
-
-      // 触发按钮：复用会话头 actions（本插件已在同席注册 2 个 id，这里追加自有 id；order 35 落在
-      // 复制按钮 30 与身份按钮 40 之间）。
-      ctx.slots.inject('conversation.session.header.actions', function () {
-        return ctx.slots.register({
-          name: 'conversation.session.header.actions',
-          id: TOGGLE_ID,
-          order: 35
-        }, function () { return react_jsx_runtime.jsx(SearchToggleAction, { t: t }); });
+        }, function () { return react_jsx_runtime.jsx(SearchPanel, { t: t, ctx: ctx }); });
       });
     }
 

@@ -242,8 +242,7 @@ Two ways to land it, pick one:
 | `conversation.input.left` | `session-identity-input` | order 40 | Identity button (tool row) |
 | `conversation.session.header.utilities` | `session-log-download` | priority −1 (shadow) | Hide stock button |
 | `sidebar.workspaces.session.menu.item` | `dsh-session-toolkit.copy-session-id` | order 500 | Copy session ID (session row ⋯ menu) |
-| `conversation.session.header.actions` | `dsh-session-toolkit.search-toggle` | order 35 | Cross-session search toggle |
-| `shell.overlay` | `dsh-session-toolkit.search-panel` | order 100 | Cross-session search panel |
+| `conversation.view` | `dsh-session-toolkit.search-panel` | order 20 | Cross-session search view (conversation tab) |
 
 ---
 
