@@ -2985,6 +2985,8 @@ collect('peer-message', apply);
     let primitives = require('@deepseek-ai/dsh-client-ui-primitives');
     var NS = 'session-search-ui';
     var SEARCH_URL = '/api/session-toolkit/search';
+    // 一键转交（#165-C）：写路由，与只读检索同一个 originGuard（host 侧 B 的 #164-B 已交付）。
+    var RELAY_URL = '/api/session-toolkit/relay';
     var DEFAULT_LIMIT = 20;
     var DEFAULT_PER_SESSION = 5;
     var DEFAULT_MAX_SESSIONS = 50;
@@ -3012,7 +3014,23 @@ collect('peer-message', apply);
       coordinate: '坐标',
       seqLabel: 'seq',
       openSession: '打开会话',
-      openSessionUnavailable: '无法打开该会话：宿主未提供会话导航通道'
+      openSessionUnavailable: '无法打开该会话：宿主未提供会话导航通道',
+      relay: '转交',
+      relayTitle: '转交到当前会话',
+      relayDescription: '把这条命中作为消息发给当前会话。它会在收件箱里看到这条内容。',
+      relayTarget: '目标会话',
+      relayConfirm: '发送',
+      relayCancel: '取消',
+      relayClose: '关闭',
+      relaySending: '发送中…',
+      relaySent: '已转交：{target}',
+      relayFailed: '转交失败：',
+      relayBusy: '当前会话已有一条转交在途（请稍后重试）',
+      relayNoTarget: '无法确定目标会话：该命中没有所属会话',
+      relayUnavailable: '宿主转交路由不可用（请求未送达）',
+      relayPreview: '将发送 {n} 个字符 · 预览：{p}',
+      relaySelf: '该命中来自本会话，无需转交',
+      relayFrom: '出处'
     };
     var en = {
       open: 'Search sessions',
@@ -3034,7 +3052,23 @@ collect('peer-message', apply);
       coordinate: 'coord',
       seqLabel: 'seq',
       openSession: 'Open session',
-      openSessionUnavailable: 'Cannot open that session: the host exposes no session navigation channel'
+      openSessionUnavailable: 'Cannot open that session: the host exposes no session navigation channel',
+      relay: 'Relay',
+      relayTitle: 'Relay to the current session',
+      relayDescription: 'Sends this hit as a message to the current session. It will appear in that session inbox.',
+      relayTarget: 'Target session',
+      relayConfirm: 'Send',
+      relayCancel: 'Cancel',
+      relayClose: 'Close',
+      relaySending: 'Sending…',
+      relaySent: 'Relayed to: {target}',
+      relayFailed: 'Relay failed:',
+      relayBusy: 'A relay to the current session is already in flight (try again shortly)',
+      relayNoTarget: 'Cannot determine the target session: this hit has no owning session',
+      relayUnavailable: 'Host relay route unreachable (request not delivered)',
+      relayPreview: 'Sending {n} characters · preview: {p}',
+      relaySelf: 'This hit comes from this session — nothing to relay',
+      relayFrom: 'From'
     };
 
     function injectCss() {
@@ -3067,12 +3101,15 @@ collect('peer-message', apply);
       '.ss-cwd{font-size:12px;font-weight:400;color:var(--dsw-alias-label-secondary);word-break:break-all}',
       '.ss-badge{flex:none;height:20px;line-height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}',
       '.ss-badge.ss-live{background:var(--dsw-alias-state-success-tertiary);color:var(--dsw-alias-state-success-primary)}',
-      '.ss-hit{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2);cursor:pointer}',
+      '.ss-hit{position:relative;display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2);cursor:pointer}',
       '.ss-hit:hover{background:var(--dsw-alias-interactive-bg-hover)}',
       '.ss-hit:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}',
-      '.ss-hit-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+      '.ss-hit-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:76px;font-size:11px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
       '.ss-hit-text{margin:0;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary);word-break:break-word;white-space:pre-wrap}',
       '.ss-tag{flex:none;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-mask-1);color:var(--dsw-alias-label-secondary)}',
+      '.ss-relay{position:absolute;top:6px;right:8px}',
+      '.ss-ok{color:var(--dsw-alias-state-success-primary)}',
+      '.ss-modal-line{margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-secondary);word-break:break-word}',
       '',
     ].join('\n');
 
@@ -3084,6 +3121,29 @@ collect('peer-message', apply);
       var s = String(id === undefined || id === null ? '' : id);
       return s.length > 12 ? s.slice(0, 12) : s;
     }
+    // 显示层净化：把不可信文本折叠成单行并限长（只折叠空白 + 截断，不改动内容字符）。
+    // 用途：会话标题取自日志原文，可能含换行或超长内容；直接拼进按钮提示 / 回执会破坏排版。
+    function displayInline(value, max) {
+      var s = String(value === undefined || value === null ? '' : value);
+      s = s.replace(/\s+/g, ' ').trim();
+      var n = typeof max === 'number' && max > 0 ? max : 60;
+      return s.length > n ? s.slice(0, n) + '\u2026' : s;
+    }
+    // host 侧对 source.time 的要求是**字符串**（非字符串直接判 INVALID_SOURCE）；number 是 epoch 毫秒
+    // ⇒ 转 ISO 8601（稳定、无相对时间漂移；与 host 自证样本同形）。string ⇒ trim 后非空才发。
+    // 其它 / 不合法（NaN、Infinity、Invalid Date）⇒ 返回 undefined，调用方**省略该键**，
+    // host 视其为「时间未知」，绝不在这里自造时间戳。绝不抛。
+    function relayTimeText(value) {
+      if (typeof value === 'string') {
+        var raw = value.trim();
+        return raw.length > 0 ? raw : undefined;
+      }
+      if (typeof value === 'number' && isFinite(value)) {
+        var d = new Date(value);
+        return isFinite(d.getTime()) ? d.toISOString() : undefined;
+      }
+      return undefined;
+    }
     function fill(template, vars) {
       var out = String(template);
       Object.keys(vars).forEach(function (k) { out = out.split('{' + k + '}').join(String(vars[k])); });
@@ -3091,12 +3151,55 @@ collect('peer-message', apply);
     }
 
     /** 命中结果：按会话分组；每组头给标题/cwd/sessionId 坐标/会话状态/命中数。 */
-    function renderResults(result, t, openHit) {
+    function renderResults(result, t, openHit, relay) {
       var returned = result && result.returned ? result.returned : {};
       var scanned = result && result.scanned ? result.scanned : {};
       var truncated = result && result.truncated ? result.truncated : {};
       var sessions = result && Array.isArray(result.sessions) ? result.sessions : [];
       var children = [];
+
+      // 命中行内的「转交」按钮（宿主 Button ⇒ 真 <button>，键盘原生可达）。
+      // 目标 = 当前会话（relay.sessionId，由 view 的 inject 传入）；出处 = 本行所属会话（session.sessionId）。
+      // 命中就来自当前会话 ⇒ 没有可转交的去处：按钮禁用 + relaySelf 说明（不靠 409 SELF_TARGET 兜这一格）。
+      // 当前会话 id 缺失 ⇒ 同样禁用并提示 relayNoTarget：宁可不发，也不猜一个目标。
+      var relayButton = function (session, match) {
+        var srcId = String(session && session.sessionId ? session.sessionId : '');
+        var targetId = typeof relay.sessionId === 'string' && relay.sessionId.length > 0
+          ? relay.sessionId
+          : '';
+        var selfHit = targetId.length > 0 && srcId === targetId;
+        var noTarget = targetId.length === 0;
+        // 提示必须与真实目标一致：目标 = 当前会话（#167 裁定口径）。旧写法 `转交 -> <出处会话 id>`
+        // 会把按钮读成「转交到出处」，与确认框/线上真目标矛盾（第二轮复核 R1）。
+        var srcTitle = typeof session.title === 'string' && session.title.length > 0
+          ? displayInline(session.title, 40)
+          : srcId;
+        var hint = selfHit
+          ? t('relaySelf')
+          : (noTarget ? t('relayNoTarget') : t('relayTitle') + '\uff08' + t('relayFrom') + ': ' + srcTitle + '\uff09');
+        return react_jsx_runtime.jsx(primitives.Button, {
+          variant: 'ghost',
+          size: 'sm',
+          className: 'ss-relay',
+          disabled: relay.busy === true || selfHit || noTarget,
+          title: hint,
+          'aria-label': hint,
+          // D4：焦点落在本按钮上时，Enter/Space 的 keydown 会冒泡到命中行的 onKeyDown，
+          // 于是「跳转 + 弹确认框」会同时发生。行 handler 按裁定不动，这里把键盘事件也拦在行外
+          // （与 onClick 的 stopPropagation 对称）。
+          onKeyDown: function (e) {
+            if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+          },
+          onClick: function (e) {
+            // 行本身是 role="button" + onClick（打开会话）⇒ 本按钮 onClick 第一件事必须
+            // stopPropagation，否则一次点击会连带触发「打开会话」（冻结装置 X5 的累计调用计数翻倍报红）。
+            if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+            relay.request(session, match);
+          },
+          children: t('relay')
+        }, 'relay');
+      };
+
       var truncatedSessions = truncated.sessions === true;
       var summaryText = fill(t('summary'), {
         s: scanned.sessionsScanned === undefined ? '?' : scanned.sessionsScanned,
@@ -3152,7 +3255,12 @@ collect('peer-message', apply);
             },
             children: [
               react_jsx_runtime.jsx('div', { className: 'ss-hit-meta', children: meta }, 'meta'),
-              react_jsx_runtime.jsx('p', { className: 'ss-hit-text', children: String(match.snippet === undefined ? '' : match.snippet) }, 'text')
+              react_jsx_runtime.jsx('p', { className: 'ss-hit-text', children: String(match.snippet === undefined ? '' : match.snippet) }, 'text'),
+              // 一键转交（#165-C）：命中行内右侧的宿主 Button。
+              // 行本身是 role="button" + onClick（打开会话）⇒ 本按钮 onClick 第一件事必须
+              // stopPropagation，否则一次点击会连带触发「打开会话」（冻结装置 X5 的累计调用计数翻倍报红）。
+              // 键盘可达来自宿主 Button 渲染的真 <button>（Enter/Space 原生）；aria-label 自带目标会话坐标。
+              relayButton(session, match)
             ]
           }, 'hit-' + String(mi));
         }).filter(function (node) { return node !== null; });
@@ -3177,6 +3285,11 @@ collect('peer-message', apply);
     function SearchPanel(props) {
       var t = props.t;
       var ctx = props.ctx;
+      // 当前会话 id（转交的收件人）：由 conversation.view 的 inject 传入（= 会话绑定对象的 key）。
+      // 缺失 / 非字符串 ⇒ undefined ⇒ 转交按钮整体禁用并出声，绝不发请求、也绝不静默改成别的目标。
+      var currentSessionId = typeof props.sessionId === 'string' && props.sessionId.length > 0
+        ? props.sessionId
+        : undefined;
       var inputState = react.useState('');
       var query = inputState[0];
       var setQuery = inputState[1];
@@ -3195,6 +3308,18 @@ collect('peer-message', apply);
       var seqRef = react.useRef(0);
       var abortRef = react.useRef(null);
       var inputRef = react.useRef(null);
+      // —— 一键转交（#165-C）五态状态机：idle -> confirming -> sending -> sent / failed ——
+      var relayPhaseState = react.useState('idle');
+      var relayPhase = relayPhaseState[0];
+      var setRelayPhase = relayPhaseState[1];
+      var relayHitState = react.useState(null);
+      var relayHit = relayHitState[0];
+      var setRelayHit = relayHitState[1];
+      var relayMsgState = react.useState('');
+      var relayMsg = relayMsgState[0];
+      var setRelayMsg = relayMsgState[1];
+      var relayAbortRef = react.useRef(null);
+      var relaySeqRef = react.useRef(0);
 
       // 打开一条命中所在的会话。
       // 通道 = 宿主 client 服务「uiWorkspace」的 openSession（会话级：只切主区域显示哪个会话；
@@ -3217,6 +3342,109 @@ collect('peer-message', apply);
         // （openSession ⇒ 主区域换成目标会话），本视图属于「当前会话」这一层，随会话切换
         // 自然离开视野；原浮层的 `setPanelOpen(false)` 只是为了不让覆盖层继续盖在目标会话上，
         // 该问题在 view 面下不存在。回到本会话时保留上次检索结果，这是有意保留的行为。
+      };
+
+      // 点「转交」：先进入确认态（不立即发请求）。在途守卫在这里也拦一道（与按钮 disabled 双保险）。
+      var requestRelay = function (session, match) {
+        if (relayPhase === 'sending') return;
+        var srcId = session && typeof session.sessionId === 'string' ? session.sessionId : '';
+        var targetId = typeof currentSessionId === 'string' ? currentSessionId : '';
+        if (srcId.length === 0 || targetId.length === 0) {
+          setNotice(t('relayNoTarget'));
+          return;
+        }
+        if (srcId === targetId) {
+          // 兜底：按钮已按 selfHit 禁用，正常点不到这里。不把 409 SELF_TARGET 当常规通路。
+          setNotice(t('relaySelf'));
+          return;
+        }
+        setRelayHit({
+          target: targetId,
+          sourceSessionId: srcId,
+          title: typeof session.title === 'string' && session.title.length > 0 ? session.title : t('noTitle'),
+          seq: typeof match.seq === 'number' ? match.seq : undefined,
+          // 原样带上（number / string 都可能）；真正的归一交给 relayTimeText 一处完成。
+          time: match.time,
+          // 读法与命中行显示等价（null 也归空）。刻意不照抄命中行那句读法字面量：
+          // scripts/session-search.assert.mjs 的 D1 负控锚点（面板那条 hit 文本读法）要求全文件恰好出现一次
+          // （replaceOnce 不唯一即抛 ⇒ 那道门 fail-closed 退 2）；照抄会让它出现两次。
+          text: String(match.snippet == null ? '' : match.snippet)
+        });
+        setRelayMsg('');
+        setRelayPhase('confirming');
+        setNotice('');
+      };
+
+      // 取消 / Escape / 遮罩点击：回 idle 且**不发请求**；sending 期不许逃出半态。
+      var cancelRelay = function () {
+        if (relayPhase !== 'confirming') return;
+        setRelayPhase('idle');
+        setRelayHit(null);
+        setRelayMsg('');
+      };
+
+      // 确认：唯一发起写请求的地方。请求体形状冻结（#164 契约）：
+      // POST /api/session-toolkit/relay · content-type: application/json ·
+      // { target, source: { sessionId, seq, time }, text }；time 缺省时**省略该键**（不自造时间戳）。
+      var sendRelay = function () {
+        if (relayPhase !== 'confirming' || relayHit === null) return;
+        var hit = relayHit;
+        var controller = typeof AbortController === 'function' ? new AbortController() : null;
+        relayAbortRef.current = controller;
+        var seq = relaySeqRef.current + 1;
+        relaySeqRef.current = seq;
+        var source = { sessionId: hit.sourceSessionId };   // 出处（命中行所属会话），不是收件人
+        if (hit.seq !== undefined) source.seq = hit.seq;
+        var timeText = relayTimeText(hit.time);           // host 只收字符串；缺省 ⇒ 省略该键
+        if (timeText !== undefined) source.time = timeText;
+        var payload = { target: hit.target, source: source, text: hit.text };
+        var init = {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify(payload)
+        };
+        if (controller !== null) init.signal = controller.signal;
+        setRelayPhase('sending');
+        setRelayMsg('');
+        fetch(RELAY_URL, init).then(function (response) {
+          return response.json().then(
+            function (body) { return { status: response.status, body: body }; },
+            function () { return { status: response.status, body: null }; }
+          );
+        }).then(function (out) {
+          if (relaySeqRef.current !== seq) return;   // 陈旧响应：丢弃
+          relayAbortRef.current = null;
+          var body = out && out.body && typeof out.body === 'object' ? out.body : null;
+          // 409 必须按 error 码分流（#167）：两种 409 的处置完全不同，混用会让用户一直重试一个
+          // 本来就不可能成功的目标。RELAY_IN_FLIGHT ⇒ 单飞文案（稍后重试有用）；
+          // SELF_TARGET ⇒ 自转发文案（重试无用）；无码 / BUSY ⇒ 退回单飞文案。
+          var code = body !== null && typeof body.error === 'string' ? body.error : '';
+          if (code === 'SELF_TARGET') {
+            setRelayPhase('failed');
+            setRelayMsg(t('relaySelf'));
+            return;
+          }
+          if (out.status === 409 || code === 'RELAY_IN_FLIGHT' || code === 'BUSY') {
+            setRelayPhase('failed');
+            setRelayMsg(t('relayBusy'));
+            return;
+          }
+          if (body === null || body.ok !== true) {
+            var detail = body !== null && typeof body.errorText === 'string' && body.errorText.length > 0
+              ? body.errorText
+              : 'HTTP ' + String(out ? out.status : '?');
+            setRelayPhase('failed');
+            setRelayMsg(t('relayFailed') + ' ' + detail);
+            return;
+          }
+          setRelayPhase('sent');
+          setRelayMsg('');
+        }).catch(function (error) {
+          if (relaySeqRef.current !== seq) return;   // 被 abort 或已被更新的转交取代
+          relayAbortRef.current = null;
+          setRelayPhase('failed');
+          setRelayMsg(t('relayFailed') + ' ' + t('relayUnavailable') + ' (' + (error && error.message ? error.message : String(error)) + ')');
+        });
       };
 
       var submit = function () {
@@ -3285,6 +3513,11 @@ collect('peer-message', apply);
             try { abortRef.current.abort(); } catch (e) { /* 忽略 */ }
             abortRef.current = null;
           }
+          // 面板关闭 / 组件卸载时同样作废在途转交（#165-C 验收 6）
+          if (relayAbortRef.current !== null) {
+            try { relayAbortRef.current.abort(); } catch (e) { /* 忽略 */ }
+            relayAbortRef.current = null;
+          }
         };
       }, []);
 
@@ -3338,12 +3571,85 @@ collect('peer-message', apply);
         children.push(react_jsx_runtime.jsx('p', { className: 'ss-state', children: t('noMatch') }, 'empty'));
       } else {
         if (notice.length > 0) children.push(react_jsx_runtime.jsx('p', { className: 'ss-state ss-err', children: notice }, 'open-error'));
-        children.push(renderResults(result, t, openHit));
+        // 成功必须给回执（跨会话副作用，结果不体现在本面板）；失败出声且不静默。
+        if (relayPhase === 'sent') {
+          children.push(react_jsx_runtime.jsx('p', {
+            className: 'ss-state ss-ok',
+            children: fill(t('relaySent'), {
+              // 收件人 = 当前会话（#167 裁定口径）。
+              target: relayHit === null ? '' : shortId(relayHit.target)
+            })
+          }, 'relay-sent'));
+          if (relayHit !== null && relayHit !== undefined) {
+            // 出处**独立成节点**（第二行）：既不与收件人拼成一个身份，标题里的内容也影响不到上面那一行。
+            children.push(react_jsx_runtime.jsx('p', {
+              className: 'ss-hint',
+              children: t('relayFrom') + ': ' + displayInline(relayHit.title)
+            }, 'relay-source'));
+          }
+        } else if (relayPhase === 'failed') {
+          children.push(react_jsx_runtime.jsx('p', { className: 'ss-state ss-err', children: relayMsg }, 'relay-failed'));
+        }
+        var relayCtl = {
+          request: requestRelay,
+          busy: relayPhase === 'sending',
+          sessionId: currentSessionId
+        };
+        children.push(renderResults(result, t, openHit, relayCtl));
+      }
+
+      // 确认框（宿主 primitives.Modal，不用 RiskConfirmation —— A 的裁定）。
+      // 正文必须让用户知道发给谁 + 将发送什么（目标坐标 + 字符数与前 60 字预览）。
+      // 初始焦点交给「取消」而不是「发送」（保守：发送需要显式操作）。
+      var relayModal = null;
+      if (relayPhase === 'confirming' || relayPhase === 'sending') {
+        var relayBusy = relayPhase === 'sending';
+        var relayText = relayHit === null ? '' : String(relayHit.text);
+        var relayPreviewText = relayText.length > 60 ? relayText.slice(0, 60) + '…' : relayText;
+        relayModal = react_jsx_runtime.jsx(primitives.Modal, {
+          open: true,
+          // sending 期不许逃出半态：宿主 Modal 不暴露关闭键的 disabled 开关，
+          // 因此关闭键、Escape、遮罩点击三条路径统一在这里拦截（返回即无效）。
+          onClose: function () { if (relayBusy) return; cancelRelay(); },
+          title: t('relayTitle'),
+          closeLabel: t('relayClose'),
+          children: [
+            react_jsx_runtime.jsx('p', { className: 'ss-modal-line', children: t('relayDescription') }, 'desc'),
+            react_jsx_runtime.jsx('p', {
+              className: 'ss-modal-line',
+              children: t('relayTarget') + ': ' + shortId(relayHit === null ? '' : relayHit.target)
+            }, 'target'),
+            react_jsx_runtime.jsx('p', {
+              className: 'ss-modal-line',
+              children: fill(t('relayPreview'), { n: relayText.length, p: relayPreviewText })
+            }, 'preview')
+          ],
+          footer: [
+            react_jsx_runtime.jsx(primitives.Button, {
+              variant: 'ghost',
+              size: 'sm',
+              disabled: relayBusy,
+              'data-modal-autofocus': true,
+              onClick: cancelRelay,
+              children: t('relayCancel')
+            }, 'cancel'),
+            react_jsx_runtime.jsx(primitives.Button, {
+              variant: 'primary',
+              size: 'sm',
+              disabled: relayBusy,
+              onClick: sendRelay,
+              children: relayBusy ? t('relaySending') : t('relayConfirm')
+            }, 'confirm')
+          ]
+        }, 'relay-modal');
       }
 
       return react_jsx_runtime.jsx('div', {
         className: 'ss-root',
-        children: react_jsx_runtime.jsx('div', { className: 'ss-card', children: children })
+        children: [
+          react_jsx_runtime.jsx('div', { className: 'ss-card', children: children }, 'card'),
+          relayModal
+        ]
       });
     }
 
@@ -3362,14 +3668,25 @@ collect('peer-message', apply);
       // 不替换任何 occupant）。order 20 落在 chat(0) 与 trajectory(10) 之后。
       // label 走本模块已注册的 locale 命名空间（与宿主两个自有 view 的写法一致：函数 + locale: NS）。
       // 宿主渲染条件 = 会话非空白态且 view 数 > 1 ⇒ 对默认安装，本 entry 会让 view tab 条首次出现。
+      // inject：`conversation.view` 是 session 作用域的 list 槽位，渲染器把该会话绑定对象的 key
+      // 作为 inject 的第一参数传入（binding.key 就等于 binding.sessionId）⇒ 这里拿到的正是**当前会话 id**。
+      // 切换会话 ⇒ binding 变 ⇒ inject 重算（entry 路径按 binding 缓存、factory 路径 useMemo 依赖 scopeBinding）。
+      // 透传给 SearchPanel 的唯一用途：转交的 target ＝ 收件人 ＝ 当前会话（#167 裁定的正式口径）。
       ctx.slots.inject('conversation.view', function () {
         return ctx.slots.register({
           name: 'conversation.view',
           id: VIEW_ID,
           order: VIEW_ORDER,
           locale: NS,
-          label: function () { return t('title'); }
-        }, function () { return react_jsx_runtime.jsx(SearchPanel, { t: t, ctx: ctx }); });
+          label: function () { return t('title'); },
+          inject: function (sessionId) { return { sessionId: sessionId }; }
+        }, function (props) {
+          return react_jsx_runtime.jsx(SearchPanel, {
+            t: t,
+            ctx: ctx,
+            sessionId: props === undefined || props === null ? undefined : props.sessionId
+          });
+        });
       });
     }
 
